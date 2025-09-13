@@ -1,0 +1,13 @@
+*.ex5
+MQL5/Logs/
+MQL5/Tester/*
+Tester/
+*.tmp
+*.log
+*.csv
+*.zip
+artifacts/
+screens/
+.DS_Store
+Thumbs.db
+.vscode/
