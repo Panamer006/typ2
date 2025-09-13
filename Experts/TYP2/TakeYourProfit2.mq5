@@ -1,5 +1,6 @@
+﻿#include "typ_execfilters.mqh"
 #property strict
-#property description "Take Your Profit 2.0 — slim build (<=20 files)"
+#property description "Take Your Profit 2.0 вЂ” slim build (<=20 files)"
 #property version   "3.1-rc2"
 
 #include <Trade/Trade.mqh>
@@ -123,3 +124,4 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
 {
   if(UseParentalLock) GLock.Handle(trans, req, res);
 }
+
