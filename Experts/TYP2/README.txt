@@ -1,21 +1,17 @@
-TYP2 — P0 Pack #001 (T2-005 Exec Filters — Logic)
+TYP2 — P0 Pack #003 (T2-001 DualMA Pro — "real" минимальная логика)
 
-Что внутри:
-- Experts/TYP2/typ_execfilters.mqh — полная логика Exec-фильтров:
-  * No-Chase (ATR/PIPS режимы)
-  * MinSpace (свинг + «круглые» уровни)
-  * Time-Stop (bars elapsed)
-  * ExecGate_PreOrder(...) — общий пред-ордерный гейт
+Файл:
+- Experts/TYP2/typ_dualma_pro.mqh
 
-Как установить:
-1) Скопируйте файл в: Experts/TYP2/ (замените, если существует).
-2) Скомпилируйте проект в MetaEditor.
-3) (Опционально — включение действий)
-   - Перед отправкой ордера вызовите:
-       if(!ExecGate_PreOrder(_Symbol,_Period,dir,entryPrice,marketPrice)) return(false);
-   - В Position Manager:
-       if(ExecTimeStop_Exceeded(_Symbol,_Period,open_time)) { /* BE/close policy */ }
+Возможности:
+- TrendStrict (EMA fast vs slow + slope)
+- AltFilters (ATR min, max spread, flat guard)
+- Сигналы: Bounce / Break / Retest / Pinch (упрощённые)
 
-Примечание:
-- Сейчас действия Time-Stop не активируем, только проверка; политику (BE/close) подключим позже.
-- Пороговые инпуты вынесены в начало файла; по умолчанию безопасные.
+Подключение:
+- В проекте include уже присутствует; замена файла безопасна.
+- В Resolver можно использовать:
+    int dir;
+    if(DMP_TrendStrict(_Symbol, _Period, dir) && DMP_AltFiltersGate(_Symbol,_Period)) { ... }
+
+Примечание: алгоритмы упрощены для быстрой интеграции; параметры — инпуты.
