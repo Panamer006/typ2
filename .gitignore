@@ -12,3 +12,7 @@ screens/
 Thumbs.db
 .vscode/
 a разное/
+
+backups/
+*.log
+
