@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <Trade/Trade.mqh>
 
 CTrade _plTrade;
@@ -68,9 +68,10 @@ public:
         {
           MqlTradeRequest r; MqlTradeResult rr; ZeroMemory(r); ZeroMemory(rr);
           r.action = TRADE_ACTION_REMOVE; r.order = oid; r.symbol = (string)OrderGetString(ORDER_SYMBOL);
-          OrderSend(r, rr);
+          { int __dir=0; double __entry=0.0; switch(r.type){ case ORDER_TYPE_BUY: __dir=+1; __entry=SymbolInfoDouble(_Symbol,SYMBOL_ASK); break; case ORDER_TYPE_SELL: __dir=-1; __entry=SymbolInfoDouble(_Symbol,SYMBOL_BID); break; case ORDER_TYPE_BUY_LIMIT: case ORDER_TYPE_BUY_STOP: __dir=+1; __entry=r.price; break; case ORDER_TYPE_SELL_LIMIT: case ORDER_TYPE_SELL_STOP: __dir=-1; __entry=r.price; break; default: __dir=0; __entry=r.price; } string __r; if(ResolverV2_AllowEntry(__dir,__entry,__r)) OrderSend(r,rr); else Print("[ENTRY BLOCKED] ",__r); }
         }
       }
     }
   }
 };
+
