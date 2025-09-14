@@ -1,4 +1,8 @@
-﻿#include "typ_dualma_pro.mqh"
+﻿#include "typ_resolver_v2.mqh"
+#include "typ_triangle.mqh"
+#include "typ_fibo_ext.mqh"
+#include "typ_rsi_divergence.mqh"
+#include "typ_dualma_pro.mqh"
 #include "typ_execfilters.mqh"
 #property strict
 #property description "Take Your Profit 2.0 вЂ” slim build (<=20 files)"
@@ -125,5 +129,6 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
 {
   if(UseParentalLock) GLock.Handle(trans, req, res);
 }
+
 
 
