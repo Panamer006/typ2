@@ -62,3 +62,4 @@
 - **GitHub Flow**: ветки `feature/T2-XXX-*`, PR (squash), delete branch, теги (`p0-baseline`, `p0-slim-toolchain`), .gitignore backups/*.log.
 
 ---
+
