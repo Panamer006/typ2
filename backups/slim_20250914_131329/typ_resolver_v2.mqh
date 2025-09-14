@@ -16,7 +16,7 @@ string _json_escape(const string s){
 }
 string _kv(const string k, const string v){ return "\"" + _json_escape(k) + "\":\"" + _json_escape(v) + "\""; }
 string _kvn(const string k, const double n){ return "\"" + _json_escape(k) + "\":" + DoubleToString(n,6); }
-// 
+
 #include "typ_execfilters.mqh"   // обязателен (есть в проекте)
 // ВАЖНО: не включаем typ_vwap.mqh здесь.
 // Если проект уже подключил его где-то  будет определён __TYP_VWAP_MQH__.
@@ -69,4 +69,3 @@ bool ResolverV2_AllowEntry(const int dir, const double entry_price, string &json
 }
 
 #endif // __TYP_RESOLVER_V2_MQH__
-

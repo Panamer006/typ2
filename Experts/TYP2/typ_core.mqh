@@ -1,92 +1,32 @@
-#pragma once
-#include <Trade/Trade.mqh>
+﻿#ifndef __TYP_CORE_MQH__
+#define __TYP_CORE_MQH__
 
-//=== Globals / enums ===
-enum ENUM_DIR { DIR_NONE=0, DIR_LONG=1, DIR_SHORT=2 };
+// SLIM stub: только то, что точно безопасно и часто нужно
 
-enum ENUM_EXIT_MODE
+// Гиджинг/неттинг  корректная реализация для MQL5
+bool IsHedging()
 {
-  EXIT_AUTO=0,
-  EXIT_SINGLE_PARTIALS,
-  EXIT_SINGLE_PARTIALS_SERVER_LIMITS,
-  EXIT_MULTI_TPS
-};
-
-enum ENUM_STAGE_RISK_MODE { STAGE_DECLINING=0, STAGE_EQUAL=1, STAGE_PROMOTE_ON_BE=2 };
-
-struct SignalCandidate
-{
-  bool   valid;
-  string module;
-  string reason;
-  ENUM_DIR dir;
-  double entry;
-  double sl;
-  double tp1;
-  double tp2;
-  double tp3;
-  double score;
-};
-
-//=== Utils ===
-namespace TYP_Utils
-{
-  double Pip(const string sym)
-  {
-    double pt = SymbolInfoDouble(sym, SYMBOL_POINT);
-    int    dg = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
-    return (dg==3 || dg==5) ? pt*10.0 : pt;
-  }
-
-  double ATR(const string sym, ENUM_TIMEFRAMES tf, int period=14)
-  {
-    int h = iATR(sym, tf, period);
-    if(h==INVALID_HANDLE) return 0.0;
-    double buf[]; ArraySetAsSeries(buf,true);
-    if(CopyBuffer(h,0,0,3,buf)<3) return 0.0;
-    return buf[0];
-  }
-
-  bool IsHedging(){ long m; AccountInfoInteger(ACCOUNT_MARGIN_MODE,m); return (m==ACCOUNT_MARGIN_MODE_RETAIL_HEDGING); }
+  long mode = (long)AccountInfoInteger(ACCOUNT_MARGIN_MODE);
+  return (mode==ACCOUNT_MARGIN_MODE_RETAIL_HEDGING || mode==ACCOUNT_MARGIN_MODE_EXCHANGE);
 }
-
-//=== NewBar helper ===
-class TYP_NewBar
-{
-  datetime m_last_bar_time;
-public:
-  bool Check(const string sym, ENUM_TIMEFRAMES tf)
-  {
-    datetime t = iTime(sym, tf, 0);
-    if(t==0) return false;
-    if(m_last_bar_time!=t){ m_last_bar_time=t; return true; }
-    return false;
-  }
-};
-
-//=== News guard (stub) ===
-namespace TYP_NewsGuard
-{
-  void Refresh(){ /* TODO: hook MT5 calendar; block new entries in windows */ }
+/* === TYP Utils (unified) === */
+double _pip(const string s){
+  const int d=(int)SymbolInfoInteger(s,SYMBOL_DIGITS);
+  const double p=SymbolInfoDouble(s,SYMBOL_POINT);
+  return (d==3||d==5)? p*10.0 : p;
 }
+double _pips2price(const string s,double pips){ return pips*_pip(s); }
 
-//=== Portfolio symbols ===
-class TYP_Portfolio
-{
-  string m_syms[]; ENUM_TIMEFRAMES m_trade_tf, m_struct_tf;
-public:
-  void Init(string csv, ENUM_TIMEFRAMES trade_tf, ENUM_TIMEFRAMES struct_tf)
-  {
-    m_trade_tf=trade_tf; m_struct_tf=struct_tf;
-    StringSplit(csv, ',', m_syms);
-    for(int i=0;i<ArraySize(m_syms);++i) m_syms[i]=StringTrim(m_syms[i]);
-  }
-  bool SymbolAllowed(const string sym)
-  {
-    for(int i=0;i<ArraySize(m_syms);++i) if(m_syms[i]==sym) return true;
-    return false;
-  }
+bool _ema(const string s, ENUM_TIMEFRAMES tf, int period, double &out){
+  int h=iMA(s,tf,period,0,MODE_EMA,PRICE_CLOSE); if(h==INVALID_HANDLE) return false;
+  double a[]; ArraySetAsSeries(a,true); if(CopyBuffer(h,0,0,1,a)<1) return false; out=a[0]; return true;
 }
+bool _atr(const string s, ENUM_TIMEFRAMES tf, int period, double &out){
+  int h=iATR(s,tf,period); if(h==INVALID_HANDLE) return false;
+  double a[]; ArraySetAsSeries(a,true); if(CopyBuffer(h,0,0,1,a)<1) return false; out=a[0]; return true;
+}
+double _slope_est(const double &arr[]){
+  if(ArraySize(arr)<2) return 0.0; return (arr[0]-arr[1]); // простой градиент
+}
+#endif // __TYP_CORE_MQH__
 
-//=== Cross-currency bias (stub) ===
-;

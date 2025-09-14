@@ -1,4 +1,4 @@
-﻿
+
 #property strict
 #ifndef __TYP_DUALMA_PRO_MQH__
 #define __TYP_DUALMA_PRO_MQH__
@@ -25,24 +25,44 @@ input double DMP_MaxSpreadPips = 2.0;       // 0 — нет проверки
 input double DMP_Flat_K        = 0.0;       // 0 — нет проверки; если ATR < K * Point → flat
 
 // ---- Helpers
-/* [TYP] util moved to typ_core.mqh */
-double _pips(const string s, double pips){ return pips*_pip(s); }
+static double _pip(const string s){
+  double p=SymbolInfoDouble(s,SYMBOL_POINT);
+  int d=(int)SymbolInfoInteger(s,SYMBOL_DIGITS);
+  return (d==3 || d==5) ? p*10.0 : p;
+}
+static double _pips(const string s, double pips){ return pips*_pip(s); }
 
-/* [TYP] util moved to typ_core.mqh */
-bool _atr(const string s, ENUM_TIMEFRAMES tf, int p, double &val)
+static bool _ema(const string s, ENUM_TIMEFRAMES tf, int period, int shift, double &val)
 {
-   int h=iATR(sym,tf,p); if(h==INVALID_HANDLE) return false;
+   int h = iMA(s, tf, period, 0, MODE_EMA, PRICE_CLOSE);
+   if(h==INVALID_HANDLE) return false;
+   double b[]; ArraySetAsSeries(b,true);
+   if(CopyBuffer(h,0,shift,2,b)<2) return false;
+   val=b[0]; return true;
+}
+static bool _atr(const string s, ENUM_TIMEFRAMES tf, int p, double &val)
+{
+   int h=iATR(s,tf,p); if(h==INVALID_HANDLE) return false;
    double v[]; ArraySetAsSeries(v,true);
    if(CopyBuffer(h,0,0,1,v)<1) return false;
    val=v[0]; return true;
 }
-/* [TYP] util moved to typ_core.mqh */
+static double _slope_est(const string s, ENUM_TIMEFRAMES tf, int period, int look)
+{
+   // простая оценка наклона EMA за look баров
+   int h=iMA(s,tf,period,0,MODE_EMA,PRICE_CLOSE);
+   if(h==INVALID_HANDLE) return 0.0;
+   double v[]; ArraySetAsSeries(v,true);
+   if(CopyBuffer(h,0,0,look+1,v)<(look+1)) return 0.0;
+   return (v[0]-v[look])/look;
+}
+
 // ---- AltFilters gate
-bool DMP_AltFiltersGate(const string s, ENUM_TIMEFRAMES tf)
+static bool DMP_AltFiltersGate(const string s, ENUM_TIMEFRAMES tf)
 {
    // spread
    if(DMP_MaxSpreadPips>0.0){
-      double spread = SymbolInfoInteger(sym, SYMBOL_SPREAD)*_pip(s)/_pip(s); // приводим к пипсам
+      double spread = SymbolInfoDouble(s,SYMBOL_SPREAD)*_pip(s)/_pip(s); // приводим к пипсам
       double maxsp  = DMP_MaxSpreadPips;
       if(spread>maxsp) { PrintFormat("[DMP][ALT] spread=%.1f>%.1f -> BLOCK",spread,maxsp); return false; }
    }
@@ -54,21 +74,21 @@ bool DMP_AltFiltersGate(const string s, ENUM_TIMEFRAMES tf)
    // flat
    if(DMP_Flat_K>0.0){
       double atr; if(!_atr(s,tf,DMP_ATR_Period,atr)) return true;
-      double pt = SymbolInfoDouble(sym,SYMBOL_POINT);
+      double pt = SymbolInfoDouble(s,SYMBOL_POINT);
       if(atr < DMP_Flat_K*pt){ PrintFormat("[DMP][ALT] flat atr=%.5f<th=%.5f -> BLOCK",atr,DMP_Flat_K*pt); return false; }
    }
    return true;
 }
 
 // ---- TrendStrict
-bool DMP_TrendStrict(const string s, ENUM_TIMEFRAMES tf, int &dir)
+static bool DMP_TrendStrict(const string s, ENUM_TIMEFRAMES tf, int &dir)
 {
    dir=0;
-   double f,s; if(!_emaP(s,tf,DMP_FastPeriod,0,f)) return false;
-   if(!_emaP(s,tf,DMP_SlowPeriod,0,s)) return false;
+   double f,s; if(!_ema(s,tf,DMP_FastPeriod,0,f)) return false;
+   if(!_ema(s,tf,DMP_SlowPeriod,0,s)) return false;
 
-   double sf = _slope_est4(s,tf,DMP_FastPeriod,DMP_SlopeLookback);
-   double ss = _slope_est4(s,tf,DMP_SlowPeriod,DMP_SlopeLookback);
+   double sf = _slope_est(s,tf,DMP_FastPeriod,DMP_SlopeLookback);
+   double ss = _slope_est(s,tf,DMP_SlowPeriod,DMP_SlopeLookback);
 
    if(DMP_MinSlope>0.0){
      if(MathAbs(sf)<DMP_MinSlope || MathAbs(ss)<DMP_MinSlope) return false;
@@ -80,13 +100,13 @@ bool DMP_TrendStrict(const string s, ENUM_TIMEFRAMES tf, int &dir)
 }
 
 // ---- Signals (минимальные правила на базе EMA)
-bool DMP_Signal_Bounce(const string s, ENUM_TIMEFRAMES tf, int &dir)
+static bool DMP_Signal_Bounce(const string s, ENUM_TIMEFRAMES tf, int &dir)
 {
    // bounce: fast EMA отталкивается от slow EMA (меняет наклон в сторону пересечения, но без факта пересечения)
    dir=0;
    double f0,f1,s0,s1;
-   if(!_emaP(s,tf,DMP_FastPeriod,0,f0) || !_emaP(s,tf,DMP_FastPeriod,1,f1)) return false;
-   if(!_emaP(s,tf,DMP_SlowPeriod,0,s0) || !_emaP(s,tf,DMP_SlowPeriod,1,s1)) return false;
+   if(!_ema(s,tf,DMP_FastPeriod,0,f0) || !_ema(s,tf,DMP_FastPeriod,1,f1)) return false;
+   if(!_ema(s,tf,DMP_SlowPeriod,0,s0) || !_ema(s,tf,DMP_SlowPeriod,1,s1)) return false;
 
    // если были сходящимися и теперь расходятся
    double d0 = f0-s0, d1 = f1-s1;
@@ -97,43 +117,43 @@ bool DMP_Signal_Bounce(const string s, ENUM_TIMEFRAMES tf, int &dir)
    return false;
 }
 
-bool DMP_Signal_Break(const string s, ENUM_TIMEFRAMES tf, int &dir)
+static bool DMP_Signal_Break(const string s, ENUM_TIMEFRAMES tf, int &dir)
 {
    // break: цена пересекает slow EMA в сторону fast EMA
    dir=0;
-   double s0; if(!_emaP(s,tf,DMP_SlowPeriod,0,s0)) return false;
-   double c0 = iClose(sym,tf,0);
-   double c1 = iClose(sym,tf,1);
+   double s0; if(!_ema(s,tf,DMP_SlowPeriod,0,s0)) return false;
+   double c0 = iClose(s,tf,0);
+   double c1 = iClose(s,tf,1);
    if(c1<s0 && c0>s0) { dir=+1; return true; }
    if(c1>s0 && c0<s0) { dir=-1; return true; }
    return false;
 }
 
-bool DMP_Signal_Retest(const string s, ENUM_TIMEFRAMES tf, int &dir)
+static bool DMP_Signal_Retest(const string s, ENUM_TIMEFRAMES tf, int &dir)
 {
    // retest: после пересечения fast/slow цена возвращается к slow EMA и отскакивает
    dir=0;
-   double f0,s0; if(!_emaP(s,tf,DMP_FastPeriod,0,f0) || !_emaP(s,tf,DMP_SlowPeriod,0,s0)) return false;
-   double c1 = iClose(sym,tf,1);
-   double s1; if(!_emaP(s,tf,DMP_SlowPeriod,1,s1)) return false;
+   double f0,s0; if(!_ema(s,tf,DMP_FastPeriod,0,f0) || !_ema(s,tf,DMP_SlowPeriod,0,s0)) return false;
+   double c1 = iClose(s,tf,1);
+   double s1; if(!_ema(s,tf,DMP_SlowPeriod,1,s1)) return false;
    // тренд должен быть определён
-   if(f0>s0 && c1<=s1 && iClose(sym,tf,0)>s0){ dir=+1; return true; }
-   if(f0<s0 && c1>=s1 && iClose(sym,tf,0)<s0){ dir=-1; return true; }
+   if(f0>s0 && c1<=s1 && iClose(s,tf,0)>s0){ dir=+1; return true; }
+   if(f0<s0 && c1>=s1 && iClose(s,tf,0)<s0){ dir=-1; return true; }
    return false;
 }
 
-bool DMP_Signal_Pinch(const string s, ENUM_TIMEFRAMES tf, int &dir)
+static bool DMP_Signal_Pinch(const string s, ENUM_TIMEFRAMES tf, int &dir)
 {
    // pinch: fast и slow сильно сблизились (возможен импульс)
    dir=0;
-   double f0,s0; if(!_emaP(s,tf,DMP_FastPeriod,0,f0) || !_emaP(s,tf,DMP_SlowPeriod,0,s0)) return false;
+   double f0,s0; if(!_ema(s,tf,DMP_FastPeriod,0,f0) || !_ema(s,tf,DMP_SlowPeriod,0,s0)) return false;
    double gap = MathAbs(f0-s0);
    double atr; if(!_atr(s,tf,DMP_ATR_Period,atr)) atr=0;
    // если gap < X% от ATR, считаем "pinch"
    double th = (atr>0 ? 0.15*atr : 3*_pip(s)); // эвристика
    if(gap<th){
       // направление по положению цены относительно slow
-      double c0=iClose(sym,tf,0);
+      double c0=iClose(s,tf,0);
       if(c0>s0){ dir=+1; return true; }
       if(c0<s0){ dir=-1; return true; }
    }
@@ -141,6 +161,3 @@ bool DMP_Signal_Pinch(const string s, ENUM_TIMEFRAMES tf, int &dir)
 }
 
 #endif // __TYP_DUALMA_PRO_MQH__
-
-
-

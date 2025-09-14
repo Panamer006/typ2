@@ -16,21 +16,25 @@ input double FE_ClusterTolPips   = 5.0;     // допустимое расхож
 input bool   FE_UseCluster       = true;
 input bool   FE_Use_ABCD         = true;
 
-/* [TYP] util moved to typ_core.mqh */
-double _pips2price(const string s, double pips){ return pips * _pip(s); }
-bool _copy_rates(const string sym, ENUM_TIMEFRAMES tf, int count, MqlRates &r[], int &got){
+static double _pip(const string s){
+  const int d = (int)SymbolInfoInteger(s,SYMBOL_DIGITS);
+  const double p = SymbolInfoDouble(s,SYMBOL_POINT);
+  return (d==3||d==5) ? p*10.0 : p;
+}
+static double _pips2price(const string s, double pips){ return pips * _pip(s); }
+static bool _copy_rates(const string sym, ENUM_TIMEFRAMES tf, int count, MqlRates &r[], int &got){
   ArrayFree(r); ArraySetAsSeries(r,true);
   got = CopyRates(sym, tf, 0, count, r);
   return (got>0);
 }
 
-bool _isPivotHigh(const MqlRates &r[], int i, int L, int R){
+static bool _isPivotHigh(const MqlRates &r[], int i, int L, int R){
   double v = r[i].High;
   for(int j=1;j<=L;j++)   if(r[i+j].High >= v) return false;
   for(int j=1;j<=R;j++)   if(r[i-j].High >  v) return false;
   return true;
 }
-bool _isPivotLow(const MqlRates &r[], int i, int L, int R){
+static bool _isPivotLow(const MqlRates &r[], int i, int L, int R){
   double v = r[i].Low;
   for(int j=1;j<=L;j++)   if(r[i+j].Low <= v)  return false;
   for(int j=1;j<=R;j++)   if(r[i-j].Low <  v)  return false;
@@ -39,7 +43,7 @@ bool _isPivotLow(const MqlRates &r[], int i, int L, int R){
 
 struct FE_Swing { int idx; double price; bool isHigh; };
 
-int FE_CollectSwings(const string sym, ENUM_TIMEFRAMES tf, FE_Swing &sw[], const int L, const int R, const int Nbars)
+static int FE_CollectSwings(const string sym, ENUM_TIMEFRAMES tf, FE_Swing &sw[], const int L, const int R, const int Nbars)
 {
   MqlRates rr[]; int got=0;
   if(!_copy_rates(sym,tf,MathMax(Nbars, L+R+50), rr, got)) return 0;
@@ -50,7 +54,7 @@ int FE_CollectSwings(const string sym, ENUM_TIMEFRAMES tf, FE_Swing &sw[], const
     if(_isPivotLow (rr,i,L,R)){ FE_Swing s; s.idx=i; s.price=rr[i].Low;  s.isHigh=false; int n=ArraySize(tmp);  ArrayResize(tmp,n+1); tmp[n]=s; }
   }
   // Оставим последние 20 свингов, переупорядочим по индексу (свежие ближе к 0)
-  ArraySort(tmp); // по idx убыв.
+  ArraySort(tmp, WHOLE_ARRAY, 0, MODE_DESCEND); // по idx убыв.
   int keep = MathMin(20, ArraySize(tmp));
   ArrayResize(sw, keep);
   for(int k=0;k<keep;k++) sw[k]=tmp[k];
@@ -58,7 +62,7 @@ int FE_CollectSwings(const string sym, ENUM_TIMEFRAMES tf, FE_Swing &sw[], const
 }
 
 // --- Построение retrace/extension уровней для AB (up=+1, down=-1)
-int FE_BuildLevels(const double A, const double B, const int dir, double &levels[])
+static int FE_BuildLevels(const double A, const double B, const int dir, double &levels[])
 {
   // retrace (A->B): 0.382, 0.5, 0.618; extension: 1.272, 1.618
   const double rts[] = {0.382, 0.500, 0.618};
@@ -83,7 +87,7 @@ int FE_BuildLevels(const double A, const double B, const int dir, double &levels
 }
 
 // --- Кластер: сравниваем уровни двух последних AB; если есть пара ближе tol -> вернём cluster
-bool FE_FindCluster(const string sym, const double L1[], const double L2[], const double tol_pips, double &cluster_price)
+static bool FE_FindCluster(const string sym, const double L1[], const double L2[], const double tol_pips, double &cluster_price)
 {
   const double tol = _pips2price(sym, tol_pips);
   for(int i=0;i<ArraySize(L1);i++)
@@ -93,7 +97,7 @@ bool FE_FindCluster(const string sym, const double L1[], const double L2[], cons
 }
 
 // --- AB=CD: A,B,C  последние чередующиеся свинги; ищем достижение D=C|B-A| (торгуем реверс)
-bool FE_Signal_ABCD(const string sym, ENUM_TIMEFRAMES tf, const FE_Swing &A, const FE_Swing &B, const FE_Swing &C, int &dir, double &Dtarget)
+static bool FE_Signal_ABCD(const string sym, ENUM_TIMEFRAMES tf, const FE_Swing &A, const FE_Swing &B, const FE_Swing &C, int &dir, double &Dtarget)
 {
   dir=0; Dtarget=0.0;
   const double ab = (B.price - A.price);
@@ -110,7 +114,7 @@ bool FE_Signal_ABCD(const string sym, ENUM_TIMEFRAMES tf, const FE_Swing &A, con
 }
 
 // --- Вспомогательная: получить два последних AB (для кластеров) и A,B,C для AB=CD
-bool FE_LastSegments(const string sym, ENUM_TIMEFRAMES tf, FE_Swing &A, FE_Swing &B, FE_Swing &C, FE_Swing &A2, FE_Swing &B2)
+static bool FE_LastSegments(const string sym, ENUM_TIMEFRAMES tf, FE_Swing &A, FE_Swing &B, FE_Swing &C, FE_Swing &A2, FE_Swing &B2)
 {
   FE_Swing sw[]; int n=FE_CollectSwings(sym,tf,sw, FE_PivotLeft, FE_PivotRight, FE_LookbackBars);
   if(n<4) return false;
@@ -125,5 +129,3 @@ bool FE_LastSegments(const string sym, ENUM_TIMEFRAMES tf, FE_Swing &A, FE_Swing
 }
 
 #endif // __TYP_FIBO_EXT_MQH__
-
-

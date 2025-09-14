@@ -9,12 +9,17 @@ input double TRI_MinSlopeAbs  = 0.0;
 input double TRI_MinTightness = 0.30;
 input double TRI_BO_BufferATR = 0.20;
 
-/* [TYP] util moved to typ_core.mqh */
+static bool _atr(const string s, ENUM_TIMEFRAMES tf, int p, double &val){
+   int h=iATR(s,tf,p); if(h==INVALID_HANDLE) return false;
+   double v[]; ArraySetAsSeries(v,true);
+   if(CopyBuffer(h,0,0,1,v)<1) return false; val=v[0]; return true; }
+
 struct TriDesc { bool found; int start; int end; double top0,top1,bot0,bot1,width0,width1; };
 
-void _line_from_points(int x1,double y1,int x2,double y2,double &a,double &b){
+static void _line_from_points(int x1,double y1,int x2,double y2,double &a,double &b){
    if(x2==x1){ a=0; b=y2; return; } a=(y2-y1)/double(x2-x1); b=y1-a*x1; }
-TriDesc TRI_Find(const string s, ENUM_TIMEFRAMES tf){
+
+static TriDesc TRI_Find(const string s, ENUM_TIMEFRAMES tf){
    TriDesc d; d.found=false; const int N=MathMax(TRI_Lookback,TRI_CompressBars+TRI_MinBars);
    MqlRates r[]; ArraySetAsSeries(r,true); int got=CopyRates(s,tf,0,N,r);
    if(got<TRI_CompressBars+TRI_MinBars) return d;
@@ -38,21 +43,19 @@ TriDesc TRI_Find(const string s, ENUM_TIMEFRAMES tf){
 
 enum TriMode { TRI_EDGE_FADE=0, TRI_BREAKOUT=1, TRI_TREND_ACCUM=2 };
 
-bool TRI_EdgeFade(const string s, ENUM_TIMEFRAMES tf, const TriDesc &d, int &dir){
+static bool TRI_EdgeFade(const string s, ENUM_TIMEFRAMES tf, const TriDesc &d, int &dir){
    dir=0; if(!d.found) return false; double c=iClose(s,tf,0);
    double dt=MathAbs(c-d.top1), db=MathAbs(c-d.bot1);
    if(dt<db){dir=-1;return true;} if(db<dt){dir=+1;return true;} return false; }
 
-bool TRI_Breakout(const string s, ENUM_TIMEFRAMES tf, const TriDesc &d, int &dir){
+static bool TRI_Breakout(const string s, ENUM_TIMEFRAMES tf, const TriDesc &d, int &dir){
    dir=0; if(!d.found) return false; double c=iClose(s,tf,0); double atr; if(!_atr(s,tf,14,atr)) atr=0;
    double buf=atr*TRI_BO_BufferATR; if(c>d.top1+buf){dir=+1;return true;} if(c<d.bot1-buf){dir=-1;return true;} return false; }
 
-bool TRI_TrendAccum(const string s, ENUM_TIMEFRAMES tf, const TriDesc &d, int &dir){
+static bool TRI_TrendAccum(const string s, ENUM_TIMEFRAMES tf, const TriDesc &d, int &dir){
    dir=0; if(!d.found) return false; int h1=iMA(s,tf,21,0,MODE_EMA,PRICE_CLOSE), h2=iMA(s,tf,55,0,MODE_EMA,PRICE_CLOSE);
    if(h1==INVALID_HANDLE||h2==INVALID_HANDLE) return false; double a[]; ArraySetAsSeries(a,true);
    if(CopyBuffer(h1,0,0,1,a)<1) return false; double f=a[0]; if(CopyBuffer(h2,0,0,1,a)<1) return false; double g=a[0];
    if(f>g){dir=+1;return true;} if(f<g){dir=-1;return true;} return false; }
 
 #endif // __TYP_TRIANGLE_MQH__
-
-

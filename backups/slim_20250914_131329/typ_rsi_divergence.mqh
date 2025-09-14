@@ -17,14 +17,14 @@ input int  RSID_Lookback    = 300;
 
 struct RSID_Swing { int idx; double price; double rsi; bool isHigh; };
 
-bool _isHigh(double a[], int i, int L, int R){
+static bool _isHigh(double a[], int i, int L, int R){
   double v=a[i]; for(int j=1;j<=L;j++) if(a[i+j] >= v) return false;
                  for(int j=1;j<=R;j++) if(a[i-j] >  v) return false; return true; }
-bool _isLow (double a[], int i, int L, int R){
+static bool _isLow (double a[], int i, int L, int R){
   double v=a[i]; for(int j=1;j<=L;j++) if(a[i+j] <= v) return false;
                  for(int j=1;j<=R;j++) if(a[i-j] <  v) return false; return true; }
 
-int RSID_Collect(const string s, ENUM_TIMEFRAMES tf, RSID_Swing &sw[])
+static int RSID_Collect(const string s, ENUM_TIMEFRAMES tf, RSID_Swing &sw[])
 {
   MqlRates r[]; ArraySetAsSeries(r,true);
   int got=CopyRates(s,tf,0,RSID_Lookback,r);
@@ -46,14 +46,14 @@ int RSID_Collect(const string s, ENUM_TIMEFRAMES tf, RSID_Swing &sw[])
       int n=ArraySize(tmp); ArrayResize(tmp,n+1); tmp[n]=s2;
     }
   }
-  ArraySort(tmp); // по idx убыв.
+  ArraySort(tmp,WHOLE_ARRAY,0,MODE_DESCEND); // по idx убыв.
   int keep=MathMin(20,ArraySize(tmp));
   ArrayResize(sw,keep); for(int k=0;k<keep;k++) sw[k]=tmp[k];
   return keep;
 }
 
 // Возвращает +1 (bull), -1 (bear) или 0 (нет)
-int RSID_CheckDivergence(const string s, ENUM_TIMEFRAMES tf)
+static int RSID_CheckDivergence(const string s, ENUM_TIMEFRAMES tf)
 {
   RSID_Swing sw[]; int n=RSID_Collect(s,tf,sw);
   if(n<2) return 0;
@@ -70,5 +70,3 @@ int RSID_CheckDivergence(const string s, ENUM_TIMEFRAMES tf)
   return 0;
 }
 #endif // __TYP_RSI_DIV_MQH__
-
-
