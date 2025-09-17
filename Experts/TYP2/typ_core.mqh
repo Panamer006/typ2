@@ -30,3 +30,4 @@ double _slope_est(const double &arr[]){
 }
 #endif // __TYP_CORE_MQH__
 
+
