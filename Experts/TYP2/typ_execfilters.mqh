@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 //+------------------------------------------------------------------+
 //| TYP2 - Execution Filters Module (T2-005) v1.1                    |
 //| Включает: NoChase, MinSpace, TimeStop, PreOrder Gate            |

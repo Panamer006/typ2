@@ -1,2 +1,4 @@
-﻿#include "typ_risk.mqh"
+﻿#include "typ_execfilters.mqh"
+#include "typ_risk.mqh"
+
 
