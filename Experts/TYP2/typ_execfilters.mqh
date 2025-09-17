@@ -10,18 +10,17 @@
 input group "Execution Filters"
 enum NoChaseMode { NC_ATR=0, NC_PIPS=1 };
 input bool        Exec_UseMinSpace          = true;
-input int         Exec_MinSpace_Lookback    = 80;     // Глубина поиска свингов
-input double      Exec_MinSpace_ATR         = 0.80;   // Мин. зазор до барьера в ATR
+input int         Exec_MinSpace_Lookback    = 80;
+input double      Exec_MinSpace_ATR         = 0.80;
 input bool        Exec_UseTimeStop          = true;
-input int         Exec_TimeStop_Bars        = 8;      // Закрыть/отменить, если N баров без прогресса
+input int         Exec_TimeStop_Bars        = 8;
 input bool        Exec_UseNoChase           = true;
-input NoChaseMode Exec_NoChase_Mode         = NC_ATR; // ATR или pips
-input double      Exec_NoChase_MaxSlipATR   = 0.20;   // Макс. догон в ATR
-input double      Exec_NoChase_MaxSlipPips  = 5.0;    // Макс. догон в пипсах
-input double      Exec_Round_StepPips       = 50.0;   // Шаг "круглых" уровней
-input double      Exec_Round_TolerancePips  = 5.0;    // Толеранс к "круглому" уровню
+input NoChaseMode Exec_NoChase_Mode         = NC_ATR;
+input double      Exec_NoChase_MaxSlipATR   = 0.20;
+input double      Exec_NoChase_MaxSlipPips  = 5.0;
+input double      Exec_Round_StepPips       = 50.0;
+input double      Exec_Round_TolerancePips  = 5.0;
 
-// --- Helpers (утилиты) ---
 namespace ExecUtils
 {
   static double _atr(const string s, ENUM_TIMEFRAMES tf, int p=14) {
@@ -39,7 +38,6 @@ namespace ExecUtils
   }
 }
 
-// --- Логика фильтров ---
 bool ExecCheck_NoChase(const string s, ENUM_TIMEFRAMES tf, const double signal_price, const double market_price) {
    if(!Exec_UseNoChase) return true;
    if(Exec_NoChase_Mode==NC_ATR){
@@ -75,7 +73,6 @@ bool ExecTimeStop_Exceeded(const string s, ENUM_TIMEFRAMES tf, const datetime op
    return (Bars(s, tf, open_time, TimeCurrent()) >= Exec_TimeStop_Bars);
 }
 
-// --- Единый Гейт для проверок перед ордером ---
 bool ExecGate_PreOrder(const string s, ENUM_TIMEFRAMES tf, const int dir, const double signal_price) {
    double market_price = (dir > 0) ? SymbolInfoDouble(s, SYMBOL_ASK) : SymbolInfoDouble(s, SYMBOL_BID);
    if(!ExecCheck_NoChase(s,tf,signal_price,market_price)) return false;

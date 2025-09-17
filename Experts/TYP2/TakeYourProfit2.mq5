@@ -1,4 +1,4 @@
-#property strict
+﻿#property strict
 #property description "Take Your Profit EA 2.0"
 #property version   "2.1.0"
 
@@ -7,8 +7,8 @@
 // ====== MODULES ======
 #include "typ_core.mqh"
 #include "typ_risk.mqh"
-#include "typ_execfilters.mqh" // <--- НАШ НОВЫЙ МОДУЛЬ
-// ... другие ваши #include ...
+#include "typ_execfilters.mqh" // <--- РќРђРЁ РќРћР’Р«Р™ РњРћР”РЈР›Р¬
+// ... РґСЂСѓРіРёРµ РІР°С€Рё #include ...
 #include "typ_strategies.mqh"
 #include "typ_be.mqh"
 #include "typ_exit.mqh"
@@ -19,7 +19,7 @@
 input int    Magic            = 68001;
 input bool   DryRun           = true;
 input ENUM_TIMEFRAMES TradeTF = PERIOD_M15;
-// ... другие ваши глобальные input ...
+// ... РґСЂСѓРіРёРµ РІР°С€Рё РіР»РѕР±Р°Р»СЊРЅС‹Рµ input ...
 
 
 // ====== STATE ======
@@ -40,7 +40,7 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
                         const MqlTradeRequest &req,
                         const MqlTradeResult &res)
 {
-  // ... логика для PM hook ...
+  // ... Р»РѕРіРёРєР° РґР»СЏ PM hook ...
 }
 
 // ====== TICK ======
@@ -49,49 +49,50 @@ void OnTick()
   if(iTime(_Symbol, TradeTF, 0) == lastBar) return;
   lastBar=iTime(_Symbol, TradeTF, 0);
 
-  // --- ШАГ 1: Проверка Глобальных Гвардов ---
-  // TODO: Заменить "1.0" на реальный риск будущей сделки из модуля AutoLot
+  // --- РЁРђР“ 1: РџСЂРѕРІРµСЂРєР° Р“Р»РѕР±Р°Р»СЊРЅС‹С… Р“РІР°СЂРґРѕРІ ---
+  // TODO: Р—Р°РјРµРЅРёС‚СЊ "1.0" РЅР° СЂРµР°Р»СЊРЅС‹Р№ СЂРёСЃРє Р±СѓРґСѓС‰РµР№ СЃРґРµР»РєРё РёР· РјРѕРґСѓР»СЏ AutoLot
   if (!Risk_PortfolioGuardsOK(_Symbol, 0, 0, 1.0))
   {
-    return; // Глобальные риски не позволяют торговать
+    return; // Р“Р»РѕР±Р°Р»СЊРЅС‹Рµ СЂРёСЃРєРё РЅРµ РїРѕР·РІРѕР»СЏСЋС‚ С‚РѕСЂРіРѕРІР°С‚СЊ
   }
   
-  // --- ШАГ 2: Сбор Сигналов-Кандидатов ---
-  // ... здесь будет логика вызова DualMA_Probe, Triangle_Probe и т.д. ...
-  // Для примера, создадим тестовый сигнал:
+  // --- РЁРђР“ 2: РЎР±РѕСЂ РЎРёРіРЅР°Р»РѕРІ-РљР°РЅРґРёРґР°С‚РѕРІ ---
+  // ... Р·РґРµСЃСЊ Р±СѓРґРµС‚ Р»РѕРіРёРєР° РІС‹Р·РѕРІР° DualMA_Probe, Triangle_Probe Рё С‚.Рґ. ...
+  // Р”Р»СЏ РїСЂРёРјРµСЂР°, СЃРѕР·РґР°РґРёРј С‚РµСЃС‚РѕРІС‹Р№ СЃРёРіРЅР°Р»:
   SignalCandidate test_signal;
   test_signal.valid = true;
   test_signal.dir = 1; // LONG
   test_signal.entry = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
   
-  // --- ШАГ 3: Проверка Сигнала через ExecGate ---
+  // --- РЁРђР“ 3: РџСЂРѕРІРµСЂРєР° РЎРёРіРЅР°Р»Р° С‡РµСЂРµР· ExecGate ---
   if (test_signal.valid)
   {
     if (ExecGate_PreOrder(_Symbol, TradeTF, test_signal.dir, test_signal.entry))
     {
       PrintFormat("[OK] Signal from %s passed ExecGate. Ready to send to Resolver.", "Test");
-      // ... здесь сигнал отправляется в Resolver ...
+      // ... Р·РґРµСЃСЊ СЃРёРіРЅР°Р» РѕС‚РїСЂР°РІР»СЏРµС‚СЃСЏ РІ Resolver ...
     }
   }
   
-  // --- ШАГ 4: Сопровождение открытых позиций ---
-  // ... здесь будет вызов PositionManager ...
+  // --- РЁРђР“ 4: РЎРѕРїСЂРѕРІРѕР¶РґРµРЅРёРµ РѕС‚РєСЂС‹С‚С‹С… РїРѕР·РёС†РёР№ ---
+  // ... Р·РґРµСЃСЊ Р±СѓРґРµС‚ РІС‹Р·РѕРІ PositionManager ...
 
 }
 ```=== END FILE ===
 
-### **Команды для PowerShell (Выгрузка в GitHub)**
+### **РљРѕРјР°РЅРґС‹ РґР»СЏ PowerShell (Р’С‹РіСЂСѓР·РєР° РІ GitHub)**
 
-После того, как вы заменили содержимое файлов, выполните этот блок в PowerShell.
+РџРѕСЃР»Рµ С‚РѕРіРѕ, РєР°Рє РІС‹ Р·Р°РјРµРЅРёР»Рё СЃРѕРґРµСЂР¶РёРјРѕРµ С„Р°Р№Р»РѕРІ, РІС‹РїРѕР»РЅРёС‚Рµ СЌС‚РѕС‚ Р±Р»РѕРє РІ PowerShell.
 
 ```powershell
-# --- Пути ---
+# --- РџСѓС‚Рё ---
 $Project = "C:\Users\User\Desktop\Take Your Profit 2"
 Set-Location $Project
 
-# --- Коммит и выгрузка ---
-Write-Host "--- Выгружаем изменения для T2-005 в GitHub ---" -ForegroundColor Yellow
+# --- РљРѕРјРјРёС‚ Рё РІС‹РіСЂСѓР·РєР° ---
+Write-Host "--- Р’С‹РіСЂСѓР¶Р°РµРј РёР·РјРµРЅРµРЅРёСЏ РґР»СЏ T2-005 РІ GitHub ---" -ForegroundColor Yellow
 git add .
 git commit -m "feat(T2-005): Finalize ExecGate logic and integration"
 git push
-Write-Host "Задача T2-005 успешно выгружена в dev-ветку." -ForegroundColor Cyan
+Write-Host "Р—Р°РґР°С‡Р° T2-005 СѓСЃРїРµС€РЅРѕ РІС‹РіСЂСѓР¶РµРЅР° РІ dev-РІРµС‚РєСѓ." -ForegroundColor Cyan
+
