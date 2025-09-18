@@ -1,4 +1,5 @@
-﻿#property strict
+﻿#include "typ_strategies.mqh"
+#property strict
 #property description "Take Your Profit 2.0 - Clean Build v2.1.0"
 #property version   "2.1.0"
 
@@ -16,3 +17,4 @@ int OnInit()
 }
 void OnDeinit(const int reason){}
 void OnTick(){}
+

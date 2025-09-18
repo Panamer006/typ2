@@ -1,76 +1,96 @@
-﻿#ifndef __TYP_STRATEGIES_MQH__
-#define __TYP_STRATEGIES_MQH__
+﻿#pragma once
+//+------------------------------------------------------------------+
+//| TYP2 - Strategies Module (T2-STRAT-NIGHT) v1.0                   |
+//| Включает: Night MR и Night Scalp                                 |
+//+------------------------------------------------------------------+
+#property copyright "TYP2"
 #include "typ_core.mqh"
 
-// === Signature strategy: DualMA Anchor (primary EMA + adaptive EMA by High/Low) ===
-class TYP_DualMA
-{
-  bool m_use; int m_p1, m_p2; ENUM_TIMEFRAMES m_tf;
-  int h_ma1_close; int h_ma2_low; int h_ma2_high;
-public:
-  void Setup(bool use,int p1,int p2,ENUM_TIMEFRAMES tf)
-  {
-    m_use=use; m_p1=p1; m_p2=p2; m_tf=tf;
-    h_ma1_close = iMA(_Symbol, m_tf, m_p1, 0, MODE_EMA, PRICE_CLOSE);
-    h_ma2_low   = iMA(_Symbol, m_tf, m_p2, 0, MODE_EMA, PRICE_LOW);
-    h_ma2_high  = iMA(_Symbol, m_tf, m_p2, 0, MODE_EMA, PRICE_HIGH);
-  }
-
-  void Evaluate(const string sym, SignalCandidate &out)
-  {
-    if(!m_use){ out.valid=false; return; }
-    double ma1[], ma2L[], ma2H[];
-    ArraySetAsSeries(ma1,true); ArraySetAsSeries(ma2L,true); ArraySetAsSeries(ma2H,true);
-    if(CopyBuffer(h_ma1_close,0,0,3,ma1)<3) { out.valid=false; return; }
-    if(CopyBuffer(h_ma2_low,  0,0,3,ma2L)<3) { out.valid=false; return; }
-    if(CopyBuffer(h_ma2_high, 0,0,3,ma2H)<3) { out.valid=false; return; }
-
-    MqlTick tk; SymbolInfoTick(sym, tk);
-    double price = tk.bid;
-
-    bool above = (price > ma1[0]);
-    double ma2  = above ? ma2L[0] : ma2H[0];
-
-    double atr = TYP_Utils::ATR(sym, m_tf, 14);
-    double touch_buf = 0.20*atr;
-    double break_buf = 0.25*atr;
-
-    ZeroMemory(out);
-    out.module = "DualMA";
-
-    // Bounce
-    if(above && (price - ma2) <= touch_buf)
-    {
-      out.valid=true; out.dir=DIR_LONG; out.entry=price; out.sl=ma2 - 0.35*atr;
-      out.tp1=price + 0.62*atr; out.tp2=price + 1.0*atr; out.tp3=price + 1.5*atr;
-      out.reason="Bounce@MA2(Low)"; out.score=70; return;
-    }
-    if(!above && (ma2 - price) <= touch_buf)
-    {
-      out.valid=true; out.dir=DIR_SHORT; out.entry=price; out.sl=ma2 + 0.35*atr;
-      out.tp1=price - 0.62*atr; out.tp2=price - 1.0*atr; out.tp3=price - 1.5*atr;
-      out.reason="Bounce@MA2(High)"; out.score=70; return;
-    }
-
-    // Break & go (placeholder)
-    if(above && (price - ma2) > break_buf)
-    {
-      out.valid=true; out.dir=DIR_LONG; out.entry=price; out.sl=ma2 - 0.35*atr;
-      out.tp1=price + 0.62*atr; out.tp2=price + 1.0*atr; out.tp3=price + 1.5*atr;
-      out.reason="BreakAboveMA2"; out.score=60; return;
-    }
-    if(!above && (ma2 - price) > break_buf)
-    {
-      out.valid=true; out.dir=DIR_SHORT; out.entry=price; out.sl=ma2 + 0.35*atr;
-      out.tp1=price - 0.62*atr; out.tp2=price - 1.0*atr; out.tp3=price - 1.5*atr;
-      out.reason="BreakBelowMA2"; out.score=60; return;
-    }
-
-    out.valid=false;
-  }
+// --- Улучшенная структура сигнала ---
+struct TYP_SignalEx {
+  bool valid; string id,symbol,bucket,reason;
+  int dir; double entry, sl, tp1, tp2, tp3; datetime expiry; double strength;
+  bool use_stop_limit; double stop_price;
 };
 
-// === Placeholders for Triangle / Fibo / Divergence / Resolver (to be implemented) ===
+// --- Утилиты для стратегий ---
+namespace StratUtils {
+  bool IsQuietRange(const string s, ENUM_TIMEFRAMES tf, int bars, double max_atr_mult) {
+    double atr = ExecUtils::_atr(s, tf); if (atr <= 0) return false;
+    double high = iHigh(s, tf, iHighest(s, tf, MODE_HIGH, bars, 1));
+    double low = iLow(s, tf, iLowest(s, tf, MODE_LOW, bars, 1));
+    return (high - low) <= max_atr_mult * atr;
+  }
+  
+  double GetEMASlope(const string s, ENUM_TIMEFRAMES tf, int period) {
+      int handle = iMA(s, tf, period, 0, MODE_EMA, PRICE_CLOSE);
+      if(handle == INVALID_HANDLE) return 0.0;
+      double ma_values[2];
+      if(CopyBuffer(handle, 0, 0, 2, ma_values) < 2) return 0.0;
+      return ma_values[0] - ma_values[1];
+  }
+}
 
-#endif // __TYP_STRATEGIES_MQH__
+// --- Реализация ночных стратегий ---
+TYP_SignalEx BuildNightMR(const string sym, ENUM_TIMEFRAMES tf) {
+  TYP_SignalEx s; ZeroMemory(s); s.symbol=sym; s.bucket="FX_Night_MR"; s.id="night_mr_v1";
+  
+  // Фильтр "Slope Veto"
+  if (MathAbs(StratUtils::GetEMASlope(sym, tf, 50)) > ExecUtils::_atr(sym, tf) * 0.1) {
+      s.reason = "Slope too high"; return s;
+  }
 
+  // Сигнал по RSI (пример)
+  int rsi_handle = iRSI(sym, tf, 14, PRICE_CLOSE);
+  if (rsi_handle != INVALID_HANDLE) {
+      double rsi_val[1];
+      if (CopyBuffer(rsi_handle, 0, 0, 1, rsi_val) > 0) {
+          double atr = ExecUtils::_atr(sym, tf);
+          if (rsi_val[0] > 70) {
+              s.valid = true; s.dir = -1; // SHORT
+              s.entry = SymbolInfoDouble(sym, SYMBOL_BID);
+              s.sl = s.entry + 1.5 * atr;
+              s.tp1 = s.entry - 1.0 * atr;
+              s.reason = "RSI Overbought";
+          } else if (rsi_val[0] < 30) {
+              s.valid = true; s.dir = 1; // LONG
+              s.entry = SymbolInfoDouble(sym, SYMBOL_ASK);
+              s.sl = s.entry - 1.5 * atr;
+              s.tp1 = s.entry + 1.0 * atr;
+              s.reason = "RSI Oversold";
+          }
+      }
+  }
+  return s;
+}
+
+TYP_SignalEx BuildNightScalp(const string sym, ENUM_TIMEFRAMES tf) {
+  TYP_SignalEx s; ZeroMemory(s); s.symbol=sym; s.bucket="FX_Night_Scalp"; s.id="night_scalp_v1";
+
+  if (!StratUtils::IsQuietRange(sym, tf, 12, 1.5)) {
+      s.reason = "Range not quiet"; return s;
+  }
+  
+  // Пример сигнала по Bollinger Bands
+  int bb_handle = iBands(sym, tf, 20, 0, 2.0, PRICE_CLOSE);
+  if (bb_handle != INVALID_HANDLE) {
+      double upper_band[1], lower_band[1];
+      if (CopyBuffer(bb_handle, 1, 0, 1, upper_band) > 0 && CopyBuffer(bb_handle, 2, 0, 1, lower_band) > 0) {
+          double price = iClose(sym, tf, 0);
+          if (price > upper_band[0]) {
+              s.valid = true; s.dir = -1; // SHORT
+              s.entry = SymbolInfoDouble(sym, SYMBOL_BID);
+              s.sl = price + ExecUtils::_atr(sym, tf) * 1.0;
+              s.tp1 = price - ExecUtils::_atr(sym, tf) * 0.8;
+              s.reason = "BB Upper Break";
+          } else if (price < lower_band[0]) {
+              s.valid = true; s.dir = 1; // LONG
+              s.entry = SymbolInfoDouble(sym, SYMBOL_ASK);
+              s.sl = price - ExecUtils::_atr(sym, tf) * 1.0;
+              s.tp1 = price + ExecUtils::_atr(sym, tf) * 0.8;
+              s.reason = "BB Lower Break";
+          }
+      }
+  }
+  return s;
+}
