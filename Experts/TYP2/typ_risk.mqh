@@ -1,4 +1,6 @@
-﻿#pragma once
+﻿#ifndef __TYP_RISK_MQH__
+#define __TYP_RISK_MQH__
+
 //+------------------------------------------------------------------+
 //| TYP2 - Portfolio Risk Manager Module (T2-RISK) v1.2              |
 //+------------------------------------------------------------------+
@@ -58,3 +60,5 @@ bool Risk_PortfolioGuardsOK(string symbol, int dir, double entryPrice, double ne
   if (!CurrencyBasket::IsOK(symbol, newTradeRiskPercent)) return false;
   return true;
 }
+
+#endif // __TYP_RISK_MQH__

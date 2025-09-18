@@ -1,4 +1,6 @@
-﻿#pragma once
+﻿#ifndef __TYP_EXECFILTERS_MQH__
+#define __TYP_EXECFILTERS_MQH__
+
 //+------------------------------------------------------------------+
 //| TYP2 - Execution Filters Module (T2-005) v1.1                    |
 //| Включает: NoChase, MinSpace, TimeStop, PreOrder Gate            |
@@ -79,3 +81,5 @@ bool ExecGate_PreOrder(const string s, ENUM_TIMEFRAMES tf, const int dir, const 
    if(!ExecCheck_MinSpace(s,tf,dir,signal_price)) return false;
    return true;
 }
+
+#endif // __TYP_EXECFILTERS_MQH__

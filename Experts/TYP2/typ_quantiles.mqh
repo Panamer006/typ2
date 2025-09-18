@@ -1,4 +1,6 @@
-﻿#pragma once
+﻿#ifndef __TYP_QUANTILES_MQH__
+#define __TYP_QUANTILES_MQH__
+
 //+------------------------------------------------------------------+
 //| TYP2 - Quantiles Loader (статистика по часам)                    |
 //+------------------------------------------------------------------+
@@ -43,3 +45,5 @@ bool TYPQ_ATRPctRange(const string sym, int hour, double &lo, double &hi, double
   int idx; if(__TYPQ_Find(sym,hour,idx)){ lo=_QRows[idx].atrpct_q20; hi=_QRows[idx].atrpct_q80; return true; }
   lo=fallbackLo; hi=fallbackHi; return false;
 }
+
+#endif // __TYP_QUANTILES_MQH__
