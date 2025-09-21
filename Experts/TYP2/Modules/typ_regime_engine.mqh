@@ -32,6 +32,16 @@ private:
     ENUM_TIMEFRAMES m_tf;
     int             m_hysteresis_bars;
 
+    // --- Пороговые значения индикаторов (устранение магических чисел) ---
+    double          m_adx_trend_threshold;      // ADX для определения тренда (22)
+    double          m_adx_flat_threshold;       // ADX для определения флэта (18)
+    double          m_adx_mature_threshold;     // ADX для зрелого тренда (40)
+    double          m_adx_unstable_threshold;   // ADX для нестабильности (30)
+    double          m_chop_trend_threshold;     // Choppiness для тренда (38)
+    double          m_chop_flat_threshold;      // Choppiness для флэта (62)
+    double          m_donchian_z_threshold;     // Donchian Z-Score порог (0.5)
+    double          m_volume_z_threshold;       // Volume Z-Score порог (-1.0)
+
     // --- Состояние ---
     E_MarketRegime  m_current_regime;
     E_MarketRegime  m_potential_regime;
@@ -44,8 +54,10 @@ private:
     int             m_h_rsi;
     int             m_h_macd_main;
     int             m_h_macd_signal;
-    int             m_h_donchian_upper;
-    int             m_h_donchian_lower;
+    int             m_h_chop;               // Choppiness Index
+    int             m_h_donchian_upper;     // Donchian Channel Upper
+    int             m_h_donchian_lower;     // Donchian Channel Lower
+    int             m_h_volume;             // Normalized Volume
     
     // --- Вспомогательные методы ---
     void CalculateRegime();
@@ -58,37 +70,85 @@ private:
     double CalculateNormalizedVolume();
 
 public:
-    // --- Конструктор ---
+    /**
+     * @brief Конструктор движка режимов рынка
+     * 
+     * Инициализирует все пороговые значения по умолчанию и устанавливает
+     * начальное состояние всех хэндлов индикаторов
+     */
     CRegimeEngine() : m_hysteresis_bars(3),
+                      // Инициализация пороговых значений
+                      m_adx_trend_threshold(22.0),
+                      m_adx_flat_threshold(18.0),
+                      m_adx_mature_threshold(40.0),
+                      m_adx_unstable_threshold(30.0),
+                      m_chop_trend_threshold(38.0),
+                      m_chop_flat_threshold(62.0),
+                      m_donchian_z_threshold(0.5),
+                      m_volume_z_threshold(-1.0),
+                      // Состояние
                       m_current_regime(REGIME_UNDEFINED),
                       m_potential_regime(REGIME_UNDEFINED),
                       m_hysteresis_counter(0),
                       m_last_update_time(0),
+                      // Хэндлы индикаторов
                       m_h_adx(INVALID_HANDLE),
                       m_h_atr(INVALID_HANDLE),
                       m_h_rsi(INVALID_HANDLE),
                       m_h_macd_main(INVALID_HANDLE),
                       m_h_macd_signal(INVALID_HANDLE),
+                      m_h_chop(INVALID_HANDLE),
                       m_h_donchian_upper(INVALID_HANDLE),
-                      m_h_donchian_lower(INVALID_HANDLE)
+                      m_h_donchian_lower(INVALID_HANDLE),
+                      m_h_volume(INVALID_HANDLE)
     {}
 
-    // --- Деструктор ---
+    /**
+     * @brief Деструктор движка режимов рынка
+     * 
+     * Освобождает все созданные хэндлы индикаторов для предотвращения
+     * утечек памяти
+     */
     ~CRegimeEngine() {
         if(m_h_adx != INVALID_HANDLE) IndicatorRelease(m_h_adx);
         if(m_h_atr != INVALID_HANDLE) IndicatorRelease(m_h_atr);
         if(m_h_rsi != INVALID_HANDLE) IndicatorRelease(m_h_rsi);
         if(m_h_macd_main != INVALID_HANDLE) IndicatorRelease(m_h_macd_main);
         if(m_h_macd_signal != INVALID_HANDLE) IndicatorRelease(m_h_macd_signal);
+        if(m_h_chop != INVALID_HANDLE) IndicatorRelease(m_h_chop);
         if(m_h_donchian_upper != INVALID_HANDLE) IndicatorRelease(m_h_donchian_upper);
         if(m_h_donchian_lower != INVALID_HANDLE) IndicatorRelease(m_h_donchian_lower);
+        if(m_h_volume != INVALID_HANDLE) IndicatorRelease(m_h_volume);
     }
 
     // --- Публичные Методы ---
+    
+    /**
+     * @brief Инициализация движка режимов
+     * @param symbol Торговый символ для анализа
+     * @param tf Таймфрейм для анализа
+     */
     void Initialize(const string symbol, const ENUM_TIMEFRAMES tf);
+    
+    /**
+     * @brief Обновление состояния движка (вызывается на каждом тике)
+     * 
+     * Выполняет полный расчет режима только при появлении нового бара
+     * для оптимизации производительности
+     */
     void Update();
-    E_MarketRegime GetCurrentRegime();
-    string GetCurrentRegimeString(); // Вспомогательная функция для логов и панели
+    
+    /**
+     * @brief Получение текущего режима рынка
+     * @return Текущий определенный режим рынка
+     */
+    E_MarketRegime GetCurrentRegime() const;
+    
+    /**
+     * @brief Получение строкового представления текущего режима
+     * @return Строковое описание режима для логов и панели
+     */
+    string GetCurrentRegimeString() const;
 };
 
 // --- Реализация Методов ---
@@ -125,9 +185,14 @@ void CRegimeEngine::Initialize(const string symbol, const ENUM_TIMEFRAMES tf) {
         return;
     }
 
-    // Для Donchian Channel используем iHighest и iLowest
-    // TODO: Реализовать создание хэндлов для Choppiness Index и Normalized Volume
+    // Создание хэндлов для дополнительных индикаторов
+    // TODO: m_h_chop = iCustom(m_symbol, m_tf, "ChoppinessIndex", 14);
+    // TODO: m_h_volume = iCustom(m_symbol, m_tf, "NormalizedVolume", 20);
     // TODO: Добавить хэндл для тикера S&P 500 (например, "US500")
+    
+    // Заглушки для пока не реализованных индикаторов
+    m_h_chop = INVALID_HANDLE; // Будет реализован позже
+    m_h_volume = INVALID_HANDLE; // Будет реализован позже
 
     Print("Regime Engine: Initialized successfully for ", symbol, " ", EnumToString(tf));
 }
@@ -192,7 +257,7 @@ void CRegimeEngine::CalculateRegime() {
         new_potential_regime = REGIME_RISK_OFF;
     
     // --- Приоритет 2: Конфликт Индикаторов ---
-    } else if (adx_value > 30 && vol_z_score < -1.0) { // Пример: сильный тренд по ADX, но аномально низкий объем
+    } else if (adx_value > m_adx_unstable_threshold && vol_z_score < m_volume_z_threshold) {
         new_potential_regime = REGIME_UNSTABLE;
 
     // --- Приоритет 3: Ослабевающий Тренд ---
@@ -201,14 +266,17 @@ void CRegimeEngine::CalculateRegime() {
 
     // --- Приоритет 4: Основные Режимы ---
     } else {
-        bool is_trend = (adx_value > 22 && chop_value < 38 && donchian_z_score > 0.5);
-        bool is_flat = (adx_value < 18 && chop_value > 62);
+        bool is_trend = (adx_value > m_adx_trend_threshold && 
+                        chop_value < m_chop_trend_threshold && 
+                        donchian_z_score > m_donchian_z_threshold);
+        bool is_flat = (adx_value < m_adx_flat_threshold && 
+                       chop_value > m_chop_flat_threshold);
 
         if (is_trend) {
-            if (adx_value > 40) new_potential_regime = REGIME_TREND_MATURE;
+            if (adx_value > m_adx_mature_threshold) new_potential_regime = REGIME_TREND_MATURE;
             else new_potential_regime = REGIME_TREND_YOUNG;
         } else if (is_flat) {
-            if (atr_z_score < -1.0) new_potential_regime = REGIME_FLAT_QUIET;
+            if (atr_z_score < m_volume_z_threshold) new_potential_regime = REGIME_FLAT_QUIET;
             else new_potential_regime = REGIME_FLAT_CHOPPY;
         } else {
             // Если ни тренд, ни флэт не определены, сохраняем предыдущий режим
@@ -240,14 +308,22 @@ void CRegimeEngine::CalculateRegime() {
 //+------------------------------------------------------------------+
 //| Получение текущего режима                                         |
 //+------------------------------------------------------------------+
-E_MarketRegime CRegimeEngine::GetCurrentRegime() {
+/**
+ * @brief Получение текущего режима рынка
+ * @return Текущий определенный режим рынка
+ */
+E_MarketRegime CRegimeEngine::GetCurrentRegime() const {
     return m_current_regime;
 }
 
 //+------------------------------------------------------------------+
 //| Получение строкового представления текущего режима                |
 //+------------------------------------------------------------------+
-string CRegimeEngine::GetCurrentRegimeString() {
+/**
+ * @brief Получение строкового представления текущего режима
+ * @return Строковое описание режима для логов и панели
+ */
+string CRegimeEngine::GetCurrentRegimeString() const {
     switch(m_current_regime) {
         case REGIME_TREND_YOUNG:      return "TREND_YOUNG";
         case REGIME_TREND_MATURE:     return "TREND_MATURE";
@@ -265,6 +341,13 @@ string CRegimeEngine::GetCurrentRegimeString() {
 //| Вспомогательные функции (заглушки для компиляции)                 |
 //+------------------------------------------------------------------+
 
+/**
+ * @brief Получение значения индикатора
+ * @param handle Хэндл индикатора
+ * @param buffer_index Индекс буфера индикатора
+ * @param shift Смещение (бар)
+ * @return Значение индикатора или 0.0 при ошибке
+ */
 double CRegimeEngine::GetIndicatorValue(int handle, int buffer_index, int shift) {
     if(handle == INVALID_HANDLE) return 0.0;
     
@@ -275,6 +358,13 @@ double CRegimeEngine::GetIndicatorValue(int handle, int buffer_index, int shift)
     return buffer[0];
 }
 
+/**
+ * @brief Вычисление Z-Score для нормализации показателей
+ * @param current_value Текущее значение для анализа
+ * @param lookback_period Период для расчета статистики
+ * @param data Массив исторических данных
+ * @return Z-Score значение или 0.0 при ошибке
+ */
 double CRegimeEngine::CalculateZScore(double current_value, int lookback_period, const double &data[]) {
     // Вычисляем Z-Score для текущего значения относительно исторических данных
     if(lookback_period <= 1) return 0.0;
@@ -300,6 +390,11 @@ double CRegimeEngine::CalculateZScore(double current_value, int lookback_period,
     return (current_value - mean) / std_dev;
 }
 
+/**
+ * @brief Проверка макро-панических условий на рынке
+ * @param sp500_symbol Символ S&P 500 для анализа
+ * @return true если детектирована макро-паника, false в противном случае
+ */
 bool CRegimeEngine::IsMarketCrashing(string sp500_symbol) {
     // Проверяем падение S&P 500 для определения макро-паники
     // Критерии: падение более чем на 3% за последние 2 дня или 5% за неделю
@@ -334,6 +429,10 @@ bool CRegimeEngine::IsMarketCrashing(string sp500_symbol) {
     return false;
 }
 
+/**
+ * @brief Определение дивергенции между ценой и осцилляторами
+ * @return true если обнаружена дивергенция, false в противном случае
+ */
 bool CRegimeEngine::HasDivergence() {
     // Простая проверка дивергенции между ценой и RSI
     // Ищем ситуации, когда цена делает новые максимумы, а RSI - нет (медвежья дивергенция)
@@ -376,6 +475,10 @@ bool CRegimeEngine::HasDivergence() {
     return false;
 }
 
+/**
+ * @brief Расчет индекса Choppiness для определения флэтовых периодов
+ * @return Значение Choppiness Index (0-100) или 50.0 при ошибке
+ */
 double CRegimeEngine::CalculateChoppinessIndex() {
     // Choppiness Index = 100 * LOG10(SUM(TrueRange, n) / (MAX(HIGH, n) - MIN(LOW, n))) / LOG10(n)
     // где n = период расчета (обычно 14)
@@ -416,6 +519,10 @@ double CRegimeEngine::CalculateChoppinessIndex() {
     return MathMax(0.0, MathMin(100.0, chop_index));
 }
 
+/**
+ * @brief Расчет нормализованной ширины канала Донча
+ * @return Ширина канала относительно ATR или 1.0 при ошибке
+ */
 double CRegimeEngine::CalculateDonchianWidth() {
     // Donchian Channel Width = (Highest High - Lowest Low) / ATR
     // Нормализуем ширину канала относительно ATR для сравнимости между инструментами
@@ -443,6 +550,10 @@ double CRegimeEngine::CalculateDonchianWidth() {
     return channel_width / atr_value;
 }
 
+/**
+ * @brief Расчет нормализованного объема торгов
+ * @return Нормализованный объем (текущий/средний) или 1.0 при ошибке
+ */
 double CRegimeEngine::CalculateNormalizedVolume() {
     // Нормализуем объем относительно скользящего среднего за последние 20 периодов
     int period = 20;

@@ -129,6 +129,17 @@ private:
     bool IsVolatilityOK(const string symbol, string &reason);
     bool IsSessionTimeOK(string signal_bucket, string &reason);
     
+    /**
+     * @brief Проверка родительского контроля (заглушка)
+     * @param reason Причина блокировки (выходной параметр)
+     * @return true если торговля разрешена
+     * 
+     * TODO: Implement full ParentalLock logic using OnTradeTransaction event.
+     * This should include checks for trading hours restrictions, maximum daily trades,
+     * account balance limits, and other protective measures.
+     */
+    bool IsParentalLockOK(string &reason);
+    
     // Вспомогательные методы
     double GetATRValue(int handle);
     string ExtractBaseCurrency(const string symbol);
@@ -227,25 +238,38 @@ void CExecGate::OnTick() {
 //+------------------------------------------------------------------+
 //| Главная функция проверки возможности исполнения                   |
 //+------------------------------------------------------------------+
+/**
+ * @brief Главная функция проверки возможности исполнения сделки
+ * @param symbol Торговый символ
+ * @param direction Направление сделки
+ * @param signal_bucket Категория сигнала
+ * @param reason Причина блокировки (выходной параметр)
+ * @return true если исполнение разрешено
+ */
 bool CExecGate::IsExecutionAllowed(const string symbol, int direction, string signal_bucket, string &reason) {
     // Последовательно вызываем все проверки
     
-    // 1. Проверка новостей
+    // 1. Проверка родительского контроля
+    if(!IsParentalLockOK(reason)) {
+        return false;
+    }
+    
+    // 2. Проверка новостей
     if(!IsNewsOK(symbol, reason)) {
         return false;
     }
     
-    // 2. Проверка спреда
+    // 3. Проверка спреда
     if(!IsSpreadOK(symbol, reason)) {
         return false;
     }
     
-    // 3. Проверка волатильности
+    // 4. Проверка волатильности
     if(!IsVolatilityOK(symbol, reason)) {
         return false;
     }
     
-    // 4. Проверка времени сессии
+    // 5. Проверка времени сессии
     if(!IsSessionTimeOK(signal_bucket, reason)) {
         return false;
     }
@@ -566,4 +590,26 @@ int CExecGate::GetCurrentHour() {
     MqlDateTime dt;
     TimeToStruct(TimeCurrent(), dt);
     return dt.hour;
+}
+
+//+------------------------------------------------------------------+
+//| Проверка родительского контроля (заглушка)                       |
+//+------------------------------------------------------------------+
+/**
+ * @brief Проверка ограничений родительского контроля
+ * @param reason Причина блокировки (выходной параметр)
+ * @return true если торговля разрешена
+ */
+bool CExecGate::IsParentalLockOK(string &reason) {
+    // TODO: Implement full ParentalLock logic using OnTradeTransaction event
+    // Possible features to implement:
+    // - Trading hours restrictions (e.g., only 9:00-17:00)
+    // - Maximum daily trades limit
+    // - Maximum daily loss limit
+    // - Account balance protection
+    // - Instrument restrictions (e.g., only major pairs)
+    // - Leverage limitations
+    
+    // Заглушка - всегда разрешаем торговлю
+    return true;
 }
