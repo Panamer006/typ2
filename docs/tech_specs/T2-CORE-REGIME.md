@@ -1,0 +1,229 @@
+﻿# Техническое Задание (ТЗ) для Задачи: T2-CORE-REGIME (Детализированная Версия)
+
+## 1. Цель
+
+Создать центральный модуль **"Движок Режимов Рынка" (Regime Engine)**. Этот модуль должен определять текущую рыночную фазу, используя продвинутую градацию состояний, и предоставлять эту информацию всем остальным системам советника.
+
+## 2. Пошаговый План Реализации
+
+### **Задача 1: Создание Файла и Базовой Структуры**
+
+1.  **Действие:** Создайте новый файл по пути Experts/TYP2/Modules/typ_regime_engine.mqh.
+2.  **Действие:** Вставьте в этот файл следующий базовый "скелет" кода. Мы будем наполнять его шаг за шагом.
+
+    `cpp
+    // --- typ_regime_engine.mqh ---
+    // (c) 2025, Take Your Profit 2.0 Project
+    // Architect: Gemini
+    // Task: T2-CORE-REGIME :: Market Regime Engine
+
+    #property copyright "TYP2"
+
+    // --- Публичный Enum для Режимов Рынка ---
+    enum E_MarketRegime {
+        // --- ТРЕНДОВЫЕ РЕЖИМЫ ---
+        REGIME_TREND_YOUNG,       // Молодой, зарождающийся тренд
+        REGIME_TREND_MATURE,      // Зрелый, устоявшийся тренд
+        REGIME_TREND_WEAKENING,   // Ослабевающий тренд, возможен разворот
+
+        // --- ФЛЭТОВЫЕ РЕЖИМЫ ---
+        REGIME_FLAT_QUIET,        // Тихий флэт, низкая волатильность
+        REGIME_FLAT_CHOPPY,       // "Пила", высокая волатильность в диапазоне
+
+        // --- ЗАЩИТНЫЕ РЕЖИМЫ ---
+        REGIME_UNSTABLE,          // Конфликт индикаторов, торговля запрещена
+        REGIME_RISK_OFF,          // Макро-паника, запрет покупки рисковых активов
+        
+        // --- НАЧАЛЬНОЕ СОСТОЯНИЕ ---
+        REGIME_UNDEFINED          // Неопределенное состояние при инициализации
+    };
+
+    // --- Класс Движка Режимов ---
+    class CRegimeEngine {
+    private:
+        // --- Параметры ---
+        string          m_symbol;
+        ENUM_TIMEFRAMES m_tf;
+        int             m_hysteresis_bars;
+
+        // --- Состояние ---
+        E_MarketRegime  m_current_regime;
+        E_MarketRegime  m_potential_regime;
+        int             m_hysteresis_counter;
+        datetime        m_last_update_time;
+
+        // --- Хэндлы Индикаторов ---
+        int             m_h_adx;
+        // ... (другие хэндлы будут добавлены позже)
+
+    public:
+        // --- Конструктор ---
+        CRegimeEngine() : m_hysteresis_bars(3),
+                          m_current_regime(REGIME_UNDEFINED),
+                          m_potential_regime(REGIME_UNDEFINED),
+                          m_hysteresis_counter(0),
+                          m_last_update_time(0),
+                          m_h_adx(INVALID_HANDLE)
+        {}
+
+        // --- Публичные Методы ---
+        void Initialize(const string symbol, const ENUM_TIMEFRAMES tf);
+        void Update();
+        E_MarketRegime GetCurrentRegime();
+        string GetCurrentRegimeString(); // Вспомогательная функция для логов и панели
+    };
+    `
+
+### **Задача 2: Реализация Методов Инициализации и Обновления**
+
+1.  **Действие:** Реализуйте метод Initialize. Его задача — создать хэндлы всех необходимых индикаторов.
+
+    `cpp
+    // Внутри класса CRegimeEngine
+    void Initialize(const string symbol, const ENUM_TIMEFRAMES tf) {
+        m_symbol = symbol;
+        m_tf = tf;
+
+        // --- Создаем хэндлы для индикаторов на указанном таймфрейме ---
+        m_h_adx = iADX(m_symbol, m_tf, 14);
+
+        // TODO: Добавить создание хэндлов для Choppiness Index, Donchian Channel,
+        // Normalized Volume, RSI, MACD и ATR.
+        // TODO: Добавить хэндл для тикера S&P 500 (например, "US500").
+    }
+    `
+
+2.  **Действие:** Реализуйте метод Update. Его задача — вызывать логику расчета только на новом баре, чтобы избежать лишних вычислений.
+
+    `cpp
+    // Внутри класса CRegimeEngine
+    void Update() {
+        datetime current_bar_time = (datetime)SeriesInfoInteger(m_symbol, m_tf, SERIES_LASTBAR_DATE);
+
+        // --- Выполняем полный расчет только один раз на бар ---
+        if(current_bar_time > m_last_update_time) {
+            m_last_update_time = current_bar_time;
+            
+            // Вызываем приватный метод, который содержит всю логику
+            CalculateRegime(); 
+        }
+    }
+    `
+
+### **Задача 3: Реализация Основной Логики (CalculateRegime)**
+
+1.  **Действие:** Создайте новый приватный метод oid CalculateRegime() внутри класса. Это будет "сердце" нашего движка.
+
+2.  **Действие:** Внутри CalculateRegime реализуйте **Шаг 1: Сбор Данных**.
+
+    `cpp
+    // Псевдокод для CalculateRegime()
+    
+    // --- 1. Сбор Данных ---
+    // Получаем значения всех индикаторов на последнем закрытом баре (shift=1)
+    double adx_value = GetIndicatorValue(m_h_adx, 0, 1);
+    // ... (получаем значения CHOP, ATR, Donchian Width, Volume, RSI, MACD)
+    
+    // Получаем Z-Score для волатильности и объема
+    double atr_z_score = CalculateZScore(atr_value, ...); 
+    double vol_z_score = CalculateZScore(volume_value, ...);
+
+    // Проверяем S&P 500
+    bool is_sp500_crashing = IsMarketCrashing("US500", ...);
+    `
+
+3.  **Действие:** Внутри CalculateRegime реализуйте **Шаг 2: Определение Потенциального Режима (m_potential_regime)**. Это последовательность проверок от высшего приоритета к низшему.
+
+    `cpp
+    // Псевдокод для CalculateRegime()
+    
+    // --- 2. Определение Потенциального Режима ---
+    E_MarketRegime new_potential_regime;
+
+    // --- Приоритет 1: Макро-Паника ---
+    if (is_sp500_crashing) {
+        new_potential_regime = REGIME_RISK_OFF;
+    
+    // --- Приоритет 2: Конфликт Индикаторов ---
+    } else if (adx_value > 30 && vol_z_score < -1.0) { // Пример: сильный тренд по ADX, но аномально низкий объем
+        new_potential_regime = REGIME_UNSTABLE;
+
+    // --- Приоритет 3: Ослабевающий Тренд ---
+    } else if (m_current_regime == REGIME_TREND_MATURE && HasDivergence(...)) {
+        new_potential_regime = REGIME_TREND_WEAKENING;
+
+    // --- Приоритет 4: Основные Режимы ---
+    } else {
+        bool is_trend = (adx_value > 22 && chop_value < 38 && donchian_z_score > 0.5);
+        bool is_flat = (adx_value < 18 && chop_value > 62);
+
+        if (is_trend) {
+            if (adx_value > 40) new_potential_regime = REGIME_TREND_MATURE;
+            else new_potential_regime = REGIME_TREND_YOUNG;
+        } else if (is_flat) {
+            if (atr_z_score < -1.0) new_potential_regime = REGIME_FLAT_QUIET;
+            else new_potential_regime = REGIME_FLAT_CHOPPY;
+        } else {
+            // Если ни тренд, ни флэт не определены, можно ввести REGIME_NORMAL
+            // или оставить предыдущий режим до появления явных сигналов.
+            // Для начала, будем сохранять предыдущий, если он был трендовым или флэтовым.
+            new_potential_regime = m_potential_regime; // Сохраняем стабильность
+        }
+    }
+    
+    m_potential_regime = new_potential_regime;
+    `
+
+4.  **Действие:** Внутри CalculateRegime реализуйте **Шаг 3: Логика Гистерезиса**.
+
+    `cpp
+    // Псевдокод для CalculateRegime()
+    
+    // --- 3. Гистерезис ---
+    static E_MarketRegime prev_potential_regime = REGIME_UNDEFINED;
+
+    if (m_potential_regime == prev_potential_regime) {
+        m_hysteresis_counter++;
+    } else {
+        m_hysteresis_counter = 1; // Сбрасываем счетчик при смене потенциального режима
+    }
+    
+    prev_potential_regime = m_potential_regime;
+
+    if (m_hysteresis_counter >= m_hysteresis_bars) {
+        if (m_current_regime != m_potential_regime) {
+            Print("Regime Engine: New regime confirmed -> ", EnumToString(m_potential_regime));
+            m_current_regime = m_potential_regime;
+        }
+    }
+    `
+
+### **Задача 4: Интеграция в Главный Файл**
+
+1.  **Действие:** Откройте файл Experts/TYP2/TakeYourProfit2.mq5.
+2.  **Действие:** Добавьте #include "Modules/typ_regime_engine.mqh".
+3.  **Действие:** Создайте глобальные переменные:
+    `cpp
+    CRegimeEngine   g_RegimeEngine;
+    E_MarketRegime  g_currentRegime;
+    `
+4.  **Действие:** В OnInit(), после всех остальных инициализаций, добавьте:
+    `cpp
+    g_RegimeEngine.Initialize(_Symbol, PERIOD_H1);
+    `
+5.  **Действие:** В OnTick(), в самом начале, добавьте:
+    `cpp
+    g_RegimeEngine.Update();
+    g_currentRegime = g_RegimeEngine.GetCurrentRegime();
+    `
+
+### **Задача 5: Вспомогательные Функции (заглушки)**
+
+1.  **Действие:** В 	yp_regime_engine.mqh добавьте "заглушки" (пустые функции с eturn false или eturn 0) для тех функций, которые мы упомянули, но еще не реализовали. Это позволит коду компилироваться.
+    *   double GetIndicatorValue(...)
+    *   double CalculateZScore(...)
+    *   ool IsMarketCrashing(...)
+    *   ool HasDivergence(...)
+    *   string GetCurrentRegimeString()
+    
+Это обеспечит полную готовность каркаса к дальнейшему наполнению логикой.
