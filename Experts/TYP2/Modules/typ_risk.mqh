@@ -31,22 +31,39 @@ struct SymbolState {
     }
 };
 
-// --- Класс для управления состояниями символов ---
+/**
+ * @brief Менеджер состояний символов для Risk Manager
+ * 
+ * TODO: Optimize symbol state storage using a hash map for O(1) access
+ * instead of current O(n) linear search. Consider using CHashMap if available
+ * or implement custom hash table for "symbol" -> "SymbolState*" mapping.
+ */
 class CSymbolStateManager : public CObject {
 private:
-    CArrayObj* m_states;
+    CArrayObj* m_states; // Временное решение с линейным поиском O(n)
     
 public:
+    /**
+     * @brief Конструктор менеджера состояний символов
+     */
     CSymbolStateManager() {
         m_states = new CArrayObj();
     }
     
+    /**
+     * @brief Деструктор - освобождает память массива состояний
+     */
     ~CSymbolStateManager() {
         if(m_states != NULL) {
             delete m_states;
         }
     }
     
+    /**
+     * @brief Получение состояния символа (создает новое если не найдено)
+     * @param symbol Торговый символ
+     * @return Указатель на состояние символа
+     */
     SymbolState* GetState(const string symbol) {
         for(int i = 0; i < m_states.Total(); i++) {
             SymbolState* state = (SymbolState*)m_states.At(i);
@@ -62,6 +79,12 @@ public:
     }
 };
 
+/**
+ * @brief Центральная система управления рисками портфеля
+ * 
+ * Обеспечивает многоуровневую защиту капитала через контроль дневной просадки,
+ * ограничения экспозиции, кулдауны между сделками и защиту от кластеров стопов.
+ */
 class CRiskManager {
 private:
     // --- ПАРАМЕТРЫ (будут инициализироваться из input-переменных) ---
@@ -96,8 +119,34 @@ private:
 
 public:
     // --- Публичные Методы ---
+    
+    /**
+     * @brief Конструктор менеджера рисков
+     */
     CRiskManager();
-    ~CRiskManager(); // Деструктор для очистки m_symbol_states_map
+    
+    /**
+     * @brief Деструктор - освобождает ресурсы
+     */
+    ~CRiskManager();
+    
+    /**
+     * @brief Инициализация системы управления рисками
+     * @param max_daily_dd_percent Максимальная дневная просадка в %
+     * @param is_gradual_dd_reduction_enabled Включить пошаговое снижение риска
+     * @param max_positions_per_currency Максимум позиций на валюту
+     * @param max_total_open_orders Максимум открытых ордеров
+     * @param max_total_open_lots Максимум открытых лотов
+     * @param max_total_risk_percent Максимальный суммарный риск в %
+     * @param cooldown_seconds_win Кулдаун после прибыльной сделки (сек)
+     * @param cooldown_seconds_loss Кулдаун после убыточной сделки (сек)
+     * @param sl_cluster_limit Лимит кластера стоп-лоссов
+     * @param sl_cluster_timespan_hours Период кластера в часах
+     * @param is_eow_protocol_enabled Включить протокол конца недели
+     * @param eow_day День недели для остановки торговли
+     * @param eow_hour Час остановки торговли
+     * @param is_recovery_protocol_enabled Включить протокол восстановления
+     */
     void Initialize(double max_daily_dd_percent = 2.0,
                    bool is_gradual_dd_reduction_enabled = true,
                    int max_positions_per_currency = 3,
@@ -112,35 +161,134 @@ public:
                    DayOfWeek eow_day = FRIDAY,
                    int eow_hour = 15,
                    bool is_recovery_protocol_enabled = true);
+    
+    /**
+     * @brief Обновление состояния на каждом тике
+     * @param current_regime Текущий режим рынка
+     */
     void OnTick(E_MarketRegime current_regime);
+    
+    /**
+     * @brief Уведомление о закрытии сделки
+     * @param symbol Символ закрытой позиции
+     * @param profit Прибыль/убыток по сделке
+     */
     void OnTradeClose(const string symbol, const double profit);
 
     // --- ФУНКЦИИ-ГВАРДЫ (для вызова перед отправкой ордера) ---
+    
+    /**
+     * @brief Получение модификатора риска с проверкой всех ограничений
+     * @param symbol Торговый символ
+     * @param risk_percent Запрашиваемый риск в %
+     * @param reason Причина модификации/блокировки (выходной параметр)
+     * @return Модификатор риска (0.0-1.0), где 0.0 = блокировка
+     */
     double GetRiskModifier(const string symbol, const double risk_percent, string &reason);
 
     // --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
+    
+    /**
+     * @brief Расчет размера лота по заданному риску
+     * @param balance Баланс счета
+     * @param risk_percent Риск в процентах
+     * @param sl_pips Размер стоп-лосса в пипсах
+     * @return Рассчитанный размер лота
+     */
     double CalculateLotSize(const double balance, const double risk_percent, const double sl_pips);
 
 private:
     // --- Приватные Методы-Проверки ---
+    
+    /**
+     * @brief Проверка дневной просадки и расчет модификатора риска
+     * @param reason Причина модификации (выходной параметр)
+     * @return Модификатор риска (0.0-1.0)
+     */
     double GetDailyDDRiskModifier(string &reason);
+    
+    /**
+     * @brief Проверка ограничений экспозиции по валютам
+     * @param symbol Торговый символ
+     * @param reason Причина блокировки (выходной параметр)
+     * @return true если экспозиция допустима
+     */
     bool IsCurrencyExposureOK(const string symbol, string &reason);
+    
+    /**
+     * @brief Проверка общих ограничений экспозиции
+     * @param new_trade_risk_percent Риск новой сделки в %
+     * @param new_trade_lot Размер лота новой сделки
+     * @param reason Причина блокировки (выходной параметр)
+     * @return true если общая экспозиция допустима
+     */
     bool IsTotalExposureOK(const double new_trade_risk_percent, double new_trade_lot, string &reason);
+    
+    /**
+     * @brief Проверка кулдауна между сделками
+     * @param symbol Торговый символ
+     * @param reason Причина блокировки (выходной параметр)
+     * @return true если кулдаун прошел
+     */
     bool IsCooldownOK(const string symbol, string &reason);
+    
+    /**
+     * @brief Проверка кластера стоп-лоссов
+     * @param symbol Торговый символ
+     * @param reason Причина блокировки (выходной параметр)
+     * @return true если кластер не превышен
+     */
     bool IsStopLossClusterOK(const string symbol, string &reason);
+    
+    /**
+     * @brief Проверка протокола конца недели
+     * @param reason Причина блокировки (выходной параметр)
+     * @return true если торговля разрешена
+     */
     bool IsEOWProtocolActive(string &reason);
     
-    // Вспомогательные методы
+    // --- Вспомогательные методы ---
+    
+    /**
+     * @brief Извлечение базовой валюты из символа
+     * @param symbol Торговый символ (например, EURUSD)
+     * @return Базовая валюта (например, EUR)
+     */
     string ExtractBaseCurrency(const string symbol);
+    
+    /**
+     * @brief Извлечение котируемой валюты из символа
+     * @param symbol Торговый символ (например, EURUSD)
+     * @return Котируемая валюта (например, USD)
+     */
     string ExtractQuoteCurrency(const string symbol);
+    
+    /**
+     * @brief Расчет общего объема открытых позиций
+     * @return Суммарный объем в лотах
+     */
     double CalculateTotalOpenLots();
+    
+    /**
+     * @brief Расчет общего риска портфеля
+     * @return Суммарный риск в процентах
+     */
     double CalculateTotalRiskPercent();
+    
+    /**
+     * @brief Подсчет позиций по указанной валюте
+     * @param currency Валюта для подсчета
+     * @return Количество позиций
+     */
     int CountPositionsByCurrency(const string currency);
 };
 
 //+------------------------------------------------------------------+
-//| Конструктор                                                      |
+//| Конструктор менеджера рисков                                      |
 //+------------------------------------------------------------------+
+/**
+ * @brief Конструктор с инициализацией значений по умолчанию
+ */
 CRiskManager::CRiskManager() {
     m_max_daily_dd_percent = 2.0;
     m_is_gradual_dd_reduction_enabled = true;
@@ -166,8 +314,11 @@ CRiskManager::CRiskManager() {
 }
 
 //+------------------------------------------------------------------+
-//| Деструктор                                                       |
+//| Деструктор менеджера рисков                                       |
 //+------------------------------------------------------------------+
+/**
+ * @brief Деструктор - освобождает динамически выделенную память
+ */
 CRiskManager::~CRiskManager() {
     if(m_symbol_states_manager != NULL) {
         delete m_symbol_states_manager;
