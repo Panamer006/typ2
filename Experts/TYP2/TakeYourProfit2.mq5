@@ -11,6 +11,7 @@ CTrade trade;
 #include "Modules/typ_regime_engine.mqh"
 #include "Modules/typ_risk.mqh"
 #include "Modules/typ_execfilters.mqh"
+#include "Modules/typ_position_manager.mqh"
 
 // --- Глобальные переменные для движка режимов ---
 CRegimeEngine   g_RegimeEngine;
@@ -19,6 +20,9 @@ E_MarketRegime  g_currentRegime;
 // --- Глобальные переменные для системы безопасности ---
 CRiskManager    g_RiskManager;
 CExecGate       g_ExecGate;
+
+// --- Глобальная переменная для управления позициями ---
+CPositionManager g_PosManager;
 
 int OnInit()
 {
@@ -63,6 +67,19 @@ int OnInit()
     3.0     // max_slippage_pips
   );
   Print("ExecGate: Initialized");
+  
+  // --- Инициализация менеджера позиций ---
+  g_PosManager.Initialize(
+    &g_RiskManager, // указатель на риск-менеджер
+    true,   // impulse_confirmation_be
+    2,      // max_addons
+    1.5,    // tp1_level
+    3.0,    // tp2_level
+    50.0,   // tp1_volume
+    30.0,   // tp2_volume
+    80.0    // adr_exit
+  );
+  Print("Position Manager: Initialized");
   
   return(INIT_SUCCEEDED);
 }
@@ -175,7 +192,87 @@ void PlaceDemoOrder(string symbol, int direction, double lot_size, double sl_pip
           ", Comment: ", comment,
           ", Regime: ", g_RegimeEngine.GetCurrentRegimeString());
           
-    // Здесь был бы реальный вызов trade.PositionOpen() для реальной торговли
+    // Симулируем успешное открытие позиции в демо режиме
+    static ulong demo_ticket_counter = 1000;
+    demo_ticket_counter++;
+    
+    // Определяем категорию сигнала (0-Конфлюэнс, 1-Королевский)
+    int signal_category = (StringFind(comment, "Royal") >= 0) ? 1 : 0;
+    double signal_score = 0.7; // Демо-качество сигнала
+    
+    // Добавляем демо-позицию в управление
+    g_PosManager.AddNewPosition(demo_ticket_counter, signal_category, signal_score);
+    
+    // В реальной торговле здесь был бы:
+    // if(trade.PositionOpen(symbol, order_type, lot_size, current_price, sl_price, tp_price, comment)) {
+    //     g_PosManager.AddNewPosition(trade.ResultOrder(), signal_category, signal_score);
+    // }
+}
+
+//+------------------------------------------------------------------+
+//| Создание реальных демо-позиций для тестирования Position Manager |
+//+------------------------------------------------------------------+
+void CreateDemoPositionForTesting() {
+    static datetime last_demo_position_time = 0;
+    
+    // Создаем реальную демо-позицию раз в 30 минут для тестирования
+    if(TimeCurrent() - last_demo_position_time < 1800) return;
+    
+    // Проверяем систему безопасности
+    string reason = "";
+    double base_risk = 1.0;
+    
+    double risk_modifier = g_RiskManager.GetRiskModifier(_Symbol, base_risk, reason);
+    if(risk_modifier <= 0.0) {
+        Print("=== DEMO POSITION BLOCKED === ", reason);
+        return;
+    }
+    
+    int direction = (MathRand() % 2 == 0) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+    if(!g_ExecGate.IsExecutionAllowed(_Symbol, direction, "DemoPositionTest", reason)) {
+        Print("=== DEMO POSITION BLOCKED === ", reason);
+        return;
+    }
+    
+    // Создаем реальную демо-позицию
+    double current_price = (direction == ORDER_TYPE_BUY) ? 
+                          SymbolInfoDouble(_Symbol, SYMBOL_ASK) : 
+                          SymbolInfoDouble(_Symbol, SYMBOL_BID);
+    
+    double sl_pips = g_ExecGate.GetAsymmetricStopLossPips(_Symbol, g_currentRegime);
+    double lot_size = 0.01; // Минимальный лот для демо
+    
+    double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+    int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
+    double pip_size = (digits == 3 || digits == 5) ? point * 10.0 : point;
+    
+    double sl_price = 0;
+    if(direction == ORDER_TYPE_BUY) {
+        sl_price = current_price - sl_pips * pip_size;
+    } else {
+        sl_price = current_price + sl_pips * pip_size;
+    }
+    
+    // Пытаемся открыть реальную позицию
+    if(trade.PositionOpen(_Symbol, (ENUM_ORDER_TYPE)direction, lot_size, current_price, sl_price, 0, "PosManager_Test")) {
+        ulong ticket = trade.ResultOrder();
+        if(ticket > 0) {
+            // Определяем категорию сигнала случайно
+            int signal_category = (MathRand() % 2); // 0 или 1
+            double signal_score = 0.5 + (MathRand() % 50) / 100.0; // 0.5-0.99
+            
+            // Добавляем в управление
+            g_PosManager.AddNewPosition(ticket, signal_category, signal_score);
+            
+            Print("=== REAL DEMO POSITION CREATED === Ticket: ", ticket, 
+                  ", Direction: ", (direction == ORDER_TYPE_BUY ? "BUY" : "SELL"),
+                  ", Category: ", signal_category, ", Score: ", signal_score);
+            
+            last_demo_position_time = TimeCurrent();
+        }
+    } else {
+        Print("=== DEMO POSITION FAILED === Error: ", trade.ResultRetcode(), " - ", trade.ResultRetcodeDescription());
+    }
 }
 void OnTick(){
   // --- Обновление движка режимов (в самом начале) ---
@@ -185,6 +282,9 @@ void OnTick(){
   // --- Обновление системы управления рисками ---
   g_RiskManager.OnTick(newRegime);
   g_ExecGate.OnTick();
+  
+  // --- Обновление менеджера позиций ---
+  g_PosManager.OnTick(newRegime);
   
   // --- Проверка необходимости закрытия позиций (flatten) ---
   if(g_ExecGate.IsFlattenRequired(_Symbol)) {
@@ -244,6 +344,10 @@ void OnTick(){
   // === ДЕМОНСТРАЦИОННАЯ ТОРГОВАЯ ЛОГИКА ===
   // Симулируем получение торгового сигнала
   DemoTradingLogic();
+  
+  // === ДЕМОНСТРАЦИЯ УПРАВЛЕНИЯ ПОЗИЦИЯМИ ===
+  // Периодически создаем реальные демо-позиции для тестирования Position Manager
+  CreateDemoPositionForTesting();
   
   // --- Логирование текущего режима каждые 100 тиков для мониторинга ---
   static int tick_counter = 0;
