@@ -15,6 +15,7 @@ CTrade trade;
 #include "Modules/typ_strategies.mqh"  // Модуль стратегий Sprint 2
 #include "Modules/typ_ma_cross_strategy.mqh" // Стратегия MA Cross (Спринт 3)
 #include "Modules/typ_resolver.mqh"    // Центральный "Мозг" системы
+#include "Modules/typ_ai_layer.mqh"    // AI-Слой для интеллектуального анализа
 #include "Modules/typ_timer_manager.mqh" // Менеджер таймеров для дросселирования
 
 // --- Глобальные переменные для движка режимов ---
@@ -39,6 +40,7 @@ CStrategy_DualMA_Anchor   g_Strategy_DualMA_Anchor;   // Стратегия "Д�
 CStrategy_DonchianBreakout g_Strategy_DonchianBreakout; // Стратегия "Пробой Дончиана" (Спринт 3)
 CStrategy_MA_Cross        g_Strategy_MA_Cross;        // Стратегия "MA Cross" (Спринт 3 Final)
 CResolver           g_Resolver;         // Центральный "Мозг" системы
+CAiLayer            g_AiLayer;          // AI-Слой для интеллектуального анализа
 CTimerManager       g_TimerManager;     // Менеджер таймеров для дросселирования
 
 int OnInit()
@@ -88,6 +90,7 @@ int OnInit()
   // --- Инициализация менеджера позиций ---
   g_PosManager.Initialize(
     &g_RiskManager, // указатель на риск-менеджер
+    &g_AiLayer,     // указатель на AI-Слой
     true,   // impulse_confirmation_be
     2,      // max_addons
     1.5,    // tp1_level
@@ -96,7 +99,7 @@ int OnInit()
     30.0,   // tp2_volume
     80.0    // adr_exit
   );
-  Print("Position Manager: Initialized");
+  Print("Position Manager: Initialized with AI Layer");
   
   // Синхронизация состояния с реальными позициями
   g_PosManager.SynchronizeState();
@@ -131,9 +134,13 @@ int OnInit()
   g_Strategy_MA_Cross.Initialize(&g_Patterns, &g_Figures, _Symbol, PERIOD_H1);
   Print("Strategy MA Cross: Initialized for ", _Symbol, " on H1 timeframe");
   
-  // Инициализация центрального Resolver (Мозг системы)
-  g_Resolver.Initialize(&g_Figures, &g_Patterns);
-  Print("Central Resolver: Initialized - The Brain is ready");
+  // Инициализация AI-Слоя (интеллектуальный анализ)
+  g_AiLayer.Initialize(&g_Patterns, &g_Figures, true); // Включаем AI анализ
+  Print("AI Layer: Initialized - Intelligent analysis ready");
+  
+  // Инициализация центрального Resolver (Мозг системы) с AI-Слоем
+  g_Resolver.Initialize(&g_Figures, &g_Patterns, &g_AiLayer);
+  Print("Central Resolver: Initialized with AI Layer - The Brain is ready");
   
   // Инициализация менеджера таймеров (дросселирование вычислений)
   // g_TimerManager автоматически инициализируется в конструкторе
@@ -146,10 +153,11 @@ int OnInit()
   Print("- Fibonacci visualization: Retracement and extension levels");
   Print("- Confluence zones: Multi-level analysis");
   
-  Print("=== SPRINT 2 & 3 FINAL INTEGRATION COMPLETE ===");
+  Print("=== SPRINT 2 & 3 + AI INTEGRATION COMPLETE ===");
   Print("Flat Strategies: Night MR, Channel Boundary, False Breakout");
   Print("Trend Strategies: DualMA Anchor, Donchian Breakout, MA Cross");
   Print("AI Decision Engine: Resolver with Flexible Filters & Countertrend Protocol");
+  Print("AI Layer: Intelligent signal analysis and position management");
   Print("Advanced Features: Conflict/Confluence Matrix, Session Filters, Volume Analysis");
   Print("Visual Layer: Full TA visualization system ready");
   
