@@ -74,6 +74,14 @@ private:
 public:
     /**
      * @brief Конструктор Resolver
+     * 
+     * TODO: Подготовка к интеграции с Rules Engine
+     * 
+     * В будущих версиях здесь будет добавлена инициализация:
+     * - CRulesEngine* m_rules_engine; // Указатель на движок правил
+     * - Динамические параметры из конфигурационного файла
+     * - Загрузка исторических данных для машинного обучения
+     * - Инициализация адаптивных алгоритмов
      */
     CResolver() : m_figures(NULL),
                   m_patterns(NULL),
@@ -110,6 +118,21 @@ public:
      * @param candidates Массив сигналов-кандидатов от стратегий
      * @param candidates_count Количество кандидатов
      * @return Структура торгового приказа
+     * 
+     * TODO: Интеграция с Движком Правил (Rules Engine)
+     * 
+     * В будущих версиях здесь будет интегрирован модуль Rules Engine для:
+     * 1. Динамического управления параметрами стратегий
+     * 2. Адаптивной настройки пороговых значений
+     * 3. Контекстно-зависимых правил принятия решений
+     * 4. Машинного обучения на основе исторических данных
+     * 5. Автоматической оптимизации весов confluence
+     * 
+     * Планируемая архитектура:
+     * - CRulesEngine::EvaluateRules(candidates, market_context)
+     * - CRulesEngine::GetDynamicThresholds(strategy_id, market_conditions)
+     * - CRulesEngine::ApplyAdaptiveWeights(candidates, historical_performance)
+     * - CRulesEngine::LearnFromOutcome(trade_result, decision_context)
      */
     TradeOrderInstruction Decide(SignalCandidate &candidates[], int candidates_count) {
         TradeOrderInstruction instruction;
@@ -137,12 +160,17 @@ public:
         }
         
         // ЭТАП 2: Скоринг и Confluence анализ (Уровень 2)
+        // TODO: Интеграция с Rules Engine для динамической оценки кандидатов
+        // candidates = g_RulesEngine.FilterCandidates(candidates, candidates_count, market_context);
+        
         if(candidates_count == 1) {
             // Единственный кандидат - анализируем его индивидуально
             return ProcessSingleCandidate(candidates[0]);
         }
         
         // ЭТАП 3: Множественные кандидаты - ищем confluence
+        // TODO: Адаптивные веса confluence на основе Rules Engine
+        // return ProcessMultipleCandidatesWithRules(candidates, candidates_count);
         return ProcessMultipleCandidates(candidates, candidates_count);
     }
     
@@ -314,6 +342,15 @@ private:
      * @param candidates Массив кандидатов
      * @param candidates_count Количество кандидатов
      * @return Торговый приказ
+     * 
+     * TODO: Расширение для интеграции с Rules Engine
+     * 
+     * Планируемые улучшения:
+     * 1. Адаптивные веса confluence на основе исторической производительности
+     * 2. Контекстно-зависимые правила для разных рыночных условий
+     * 3. Машинное обучение для оптимизации параметров confluence
+     * 4. Динамическая корректировка пороговых значений
+     * 5. Интеграция с внешними источниками данных (новости, экономические индикаторы)
      */
     TradeOrderInstruction ProcessMultipleCandidates(SignalCandidate &candidates[], int candidates_count) {
         TradeOrderInstruction instruction;
