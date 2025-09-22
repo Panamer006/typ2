@@ -77,6 +77,21 @@ private:
     string                  m_strategy_names[10];       // Названия стратегий для индексации
     int                     m_strategy_count;           // Количество зарегистрированных стратегий
     
+    // --- Гибкие фильтры ---
+    double                  m_confidence_threshold;     // Динамический порог confidence
+    double                  m_risk_reward_threshold;    // Динамический порог R:R
+    double                  m_volume_filter_threshold;  // Порог фильтра объема
+    double                  m_volatility_filter;        // Фильтр волатильности
+    bool                    m_enable_news_filter;       // Включение фильтра новостей
+    bool                    m_enable_session_filter;    // Включение фильтра сессий
+    
+    // --- Протокол Контртренда ---
+    bool                    m_enable_countertrend;      // Включение контртрендовых сигналов
+    double                  m_countertrend_threshold;   // Порог для контртрендовых сигналов
+    int                     m_countertrend_max_attempts; // Максимум попыток контртренда
+    int                     m_countertrend_attempts;    // Текущее количество попыток
+    datetime                m_last_countertrend_time;   // Время последнего контртрендового сигнала
+    
 public:
     /**
      * @brief Конструктор Resolver
@@ -100,10 +115,27 @@ public:
                   m_total_decisions(0),
                   m_macro_decisions(0),
                   m_confluence_decisions(0),
-                  m_strategy_count(0)
+                  m_strategy_count(0),
+                  m_confidence_threshold(0.7),
+                  m_risk_reward_threshold(1.5),
+                  m_volume_filter_threshold(1.2),
+                  m_volatility_filter(0.5),
+                  m_enable_news_filter(true),
+                  m_enable_session_filter(true),
+                  m_enable_countertrend(false),
+                  m_countertrend_threshold(0.8),
+                  m_countertrend_max_attempts(3),
+                  m_countertrend_attempts(0),
+                  m_last_countertrend_time(0)
     {
         // Инициализация матриц конфликтов и конфлюэнса
         InitializeConflictConfluenceMatrices();
+        
+        // Инициализация гибких фильтров
+        InitializeFlexibleFilters();
+        
+        // Инициализация протокола контртренда
+        InitializeCountertrendProtocol();
     }
     
     /**
@@ -175,16 +207,32 @@ public:
             return instruction;
         }
         
-        // ЭТАП 3: Скоринг и Confluence анализ (Уровень 2)
+        // ЭТАП 3: Применение гибких фильтров
+        int filtered_count = ApplyFlexibleFilters(candidates, candidates_count);
+        if(filtered_count == 0) {
+            instruction.decision_reason = "All candidates filtered out by flexible filters";
+            return instruction;
+        }
+        
+        // ЭТАП 4: Анализ контртрендовых возможностей
+        if(AnalyzeCountertrendOpportunities(candidates, candidates_count, REGIME_UNDEFINED)) {
+            Print("Resolver: Countertrend opportunity detected and processed");
+        }
+        
+        // ЭТАП 5: Скоринг и Confluence анализ (Уровень 2)
         // TODO: Интеграция с Rules Engine для динамической оценки кандидатов
         // candidates = g_RulesEngine.FilterCandidates(candidates, candidates_count, market_context);
         
-        if(candidates_count == 1) {
+        if(filtered_count == 1) {
             // Единственный кандидат - анализируем его индивидуально
-            return ProcessSingleCandidate(candidates[0]);
+            for(int i = 0; i < candidates_count; i++) {
+                if(candidates[i].isValid) {
+                    return ProcessSingleCandidate(candidates[i]);
+                }
+            }
         }
         
-        // ЭТАП 4: Множественные кандидаты - ищем confluence
+        // ЭТАП 6: Множественные кандидаты - ищем confluence
         // TODO: Адаптивные веса confluence на основе Rules Engine
         // return ProcessMultipleCandidatesWithRules(candidates, candidates_count);
         return ProcessMultipleCandidates(candidates, candidates_count);
@@ -708,5 +756,244 @@ private:
         
         stats_string = StringFormat("Matrix Stats: Strategies=%d, High Conflicts=%d, High Confluences=%d",
                                    m_strategy_count, high_conflicts, high_confluences);
+    }
+    
+    /**
+     * @brief Инициализация гибких фильтров
+     */
+    void InitializeFlexibleFilters() {
+        // Адаптивные пороги на основе рыночных условий
+        m_confidence_threshold = 0.7;      // Базовый порог confidence
+        m_risk_reward_threshold = 1.5;     // Базовый порог R:R
+        m_volume_filter_threshold = 1.2;   // Порог фильтра объема
+        m_volatility_filter = 0.5;         // Фильтр волатильности
+        
+        // Включение фильтров
+        m_enable_news_filter = true;       // Фильтр новостей
+        m_enable_session_filter = true;    // Фильтр торговых сессий
+        
+        Print("Resolver: Flexible filters initialized");
+    }
+    
+    /**
+     * @brief Инициализация протокола контртренда
+     */
+    void InitializeCountertrendProtocol() {
+        m_enable_countertrend = false;     // По умолчанию отключен
+        m_countertrend_threshold = 0.8;    // Высокий порог для контртренда
+        m_countertrend_max_attempts = 3;   // Максимум 3 попытки
+        m_countertrend_attempts = 0;       // Счетчик попыток
+        m_last_countertrend_time = 0;      // Время последней попытки
+        
+        Print("Resolver: Countertrend protocol initialized");
+    }
+    
+    /**
+     * @brief Применение гибких фильтров к кандидатам
+     * @param candidates Массив кандидатов
+     * @param candidates_count Количество кандидатов
+     * @return Количество отфильтрованных кандидатов
+     */
+    int ApplyFlexibleFilters(SignalCandidate &candidates[], int candidates_count) {
+        int filtered_count = 0;
+        
+        for(int i = 0; i < candidates_count; i++) {
+            if(!candidates[i].isValid) continue;
+            
+            bool passed_filters = true;
+            string filter_reason = "";
+            
+            // Фильтр confidence score
+            if(candidates[i].confidence_score < m_confidence_threshold) {
+                passed_filters = false;
+                filter_reason = StringFormat("Confidence too low: %.2f < %.2f", 
+                                           candidates[i].confidence_score, m_confidence_threshold);
+            }
+            
+            // Фильтр R:R соотношения
+            if(passed_filters && candidates[i].risk_reward_ratio < m_risk_reward_threshold) {
+                passed_filters = false;
+                filter_reason = StringFormat("R:R too low: %.2f < %.2f", 
+                                           candidates[i].risk_reward_ratio, m_risk_reward_threshold);
+            }
+            
+            // Фильтр объема (если доступен)
+            if(passed_filters && m_enable_news_filter) {
+                // Здесь можно добавить проверку объема
+                // Пока пропускаем
+            }
+            
+            // Фильтр волатильности
+            if(passed_filters && m_volatility_filter > 0) {
+                // Здесь можно добавить проверку волатильности
+                // Пока пропускаем
+            }
+            
+            // Фильтр торговых сессий
+            if(passed_filters && m_enable_session_filter) {
+                if(!IsInActiveTradingSession()) {
+                    passed_filters = false;
+                    filter_reason = "Outside active trading session";
+                }
+            }
+            
+            if(!passed_filters) {
+                candidates[i].isValid = false;
+                candidates[i].signal_reason = "Filtered: " + filter_reason;
+            } else {
+                filtered_count++;
+            }
+        }
+        
+        return filtered_count;
+    }
+    
+    /**
+     * @brief Проверка активной торговой сессии
+     * @return true если текущее время в активной сессии
+     */
+    bool IsInActiveTradingSession() {
+        datetime current_time = TimeCurrent();
+        MqlDateTime time_struct;
+        TimeToStruct(current_time, time_struct);
+        
+        int hour = time_struct.hour;
+        
+        // Лондонская сессия: 8:00 - 17:00 GMT
+        // Нью-Йоркская сессия: 13:00 - 22:00 GMT
+        // Азиатская сессия: 0:00 - 9:00 GMT
+        
+        return (hour >= 8 && hour < 17) ||   // Лондон
+               (hour >= 13 && hour < 22) ||  // Нью-Йорк
+               (hour >= 0 && hour < 9);      // Азия
+    }
+    
+    /**
+     * @brief Анализ контртрендовых возможностей
+     * @param candidates Массив кандидатов
+     * @param candidates_count Количество кандидатов
+     * @param current_regime Текущий режим рынка
+     * @return true если найдены контртрендовые возможности
+     */
+    bool AnalyzeCountertrendOpportunities(SignalCandidate &candidates[], int candidates_count, E_MarketRegime current_regime) {
+        if(!m_enable_countertrend) return false;
+        
+        // Проверяем лимит попыток
+        if(m_countertrend_attempts >= m_countertrend_max_attempts) {
+            return false;
+        }
+        
+        // Проверяем время с последней попытки (минимум 1 час)
+        datetime current_time = TimeCurrent();
+        if(current_time - m_last_countertrend_time < 3600) {
+            return false;
+        }
+        
+        // Ищем контртрендовые сигналы только в определенных режимах
+        if(current_regime != REGIME_TREND_STRONG && 
+           current_regime != REGIME_TREND_WEAKENING) {
+            return false;
+        }
+        
+        // Ищем сигналы с очень высоким confidence score
+        for(int i = 0; i < candidates_count; i++) {
+            if(candidates[i].isValid && 
+               candidates[i].confidence_score >= m_countertrend_threshold) {
+                
+                // Проверяем, является ли сигнал контртрендовым
+                if(IsCountertrendSignal(candidates[i], current_regime)) {
+                    m_countertrend_attempts++;
+                    m_last_countertrend_time = current_time;
+                    
+                    Print("Resolver: Countertrend opportunity detected - attempt ", m_countertrend_attempts);
+                    return true;
+                }
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * @brief Проверка контртрендового сигнала
+     * @param candidate Кандидат для проверки
+     * @param current_regime Текущий режим рынка
+     * @return true если сигнал контртрендовый
+     */
+    bool IsCountertrendSignal(const SignalCandidate &candidate, E_MarketRegime current_regime) {
+        // В сильном тренде ищем сигналы против тренда
+        if(current_regime == REGIME_TREND_STRONG) {
+            // Здесь можно добавить логику определения направления тренда
+            // и сравнения с направлением сигнала
+            return true; // Упрощенная версия
+        }
+        
+        // В ослабевающем тренде контртрендовые сигналы более вероятны
+        if(current_regime == REGIME_TREND_WEAKENING) {
+            return candidate.confidence_score > 0.9; // Очень высокий confidence
+        }
+        
+        return false;
+    }
+    
+    /**
+     * @brief Сброс счетчика контртрендовых попыток
+     */
+    void ResetCountertrendAttempts() {
+        m_countertrend_attempts = 0;
+        m_last_countertrend_time = 0;
+        Print("Resolver: Countertrend attempts reset");
+    }
+    
+    /**
+     * @brief Настройка гибких фильтров
+     * @param confidence_threshold Порог confidence
+     * @param risk_reward_threshold Порог R:R
+     * @param volume_threshold Порог объема
+     * @param volatility_filter Фильтр волатильности
+     */
+    void ConfigureFlexibleFilters(double confidence_threshold, 
+                                 double risk_reward_threshold,
+                                 double volume_threshold,
+                                 double volatility_filter) {
+        m_confidence_threshold = confidence_threshold;
+        m_risk_reward_threshold = risk_reward_threshold;
+        m_volume_filter_threshold = volume_threshold;
+        m_volatility_filter = volatility_filter;
+        
+        Print("Resolver: Flexible filters configured - Confidence: ", confidence_threshold, 
+              ", R:R: ", risk_reward_threshold, ", Volume: ", volume_threshold, 
+              ", Volatility: ", volatility_filter);
+    }
+    
+    /**
+     * @brief Включение/отключение протокола контртренда
+     * @param enable Включить контртренд
+     * @param threshold Порог для контртрендовых сигналов
+     * @param max_attempts Максимум попыток
+     */
+    void ConfigureCountertrendProtocol(bool enable, double threshold, int max_attempts) {
+        m_enable_countertrend = enable;
+        m_countertrend_threshold = threshold;
+        m_countertrend_max_attempts = max_attempts;
+        
+        if(enable) {
+            Print("Resolver: Countertrend protocol enabled - Threshold: ", threshold, 
+                  ", Max attempts: ", max_attempts);
+        } else {
+            Print("Resolver: Countertrend protocol disabled");
+        }
+    }
+    
+    /**
+     * @brief Получение статистики фильтров
+     * @param stats_string Строка со статистикой (выходной параметр)
+     */
+    void GetFilterStats(string &stats_string) {
+        stats_string = StringFormat("Filter Stats: Confidence=%.2f, R:R=%.2f, Volume=%.2f, Volatility=%.2f, Countertrend=%s (%d/%d)",
+                                   m_confidence_threshold, m_risk_reward_threshold, 
+                                   m_volume_filter_threshold, m_volatility_filter,
+                                   m_enable_countertrend ? "ON" : "OFF",
+                                   m_countertrend_attempts, m_countertrend_max_attempts);
     }
 };

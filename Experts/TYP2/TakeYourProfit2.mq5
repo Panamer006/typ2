@@ -13,6 +13,7 @@ CTrade trade;
 #include "Modules/typ_execfilters.mqh"
 #include "Modules/typ_position_manager.mqh"
 #include "Modules/typ_strategies.mqh"  // Модуль стратегий Sprint 2
+#include "Modules/typ_ma_cross_strategy.mqh" // Стратегия MA Cross (Спринт 3)
 #include "Modules/typ_resolver.mqh"    // Центральный "Мозг" системы
 #include "Modules/typ_timer_manager.mqh" // Менеджер таймеров для дросселирования
 
@@ -36,6 +37,7 @@ CStrategy_ChannelBoundary g_Strategy_ChannelBoundary; // Стратегия "Г�
 CStrategy_FalseBreakout   g_Strategy_FalseBreakout;   // Стратегия "Ложный Пробой"
 CStrategy_DualMA_Anchor   g_Strategy_DualMA_Anchor;   // Стратегия "Двойная MA с Якорем" (Спринт 3)
 CStrategy_DonchianBreakout g_Strategy_DonchianBreakout; // Стратегия "Пробой Дончиана" (Спринт 3)
+CStrategy_MA_Cross        g_Strategy_MA_Cross;        // Стратегия "MA Cross" (Спринт 3 Final)
 CResolver           g_Resolver;         // Центральный "Мозг" системы
 CTimerManager       g_TimerManager;     // Менеджер таймеров для дросселирования
 
@@ -125,6 +127,10 @@ int OnInit()
   g_Strategy_DonchianBreakout.Initialize(&g_Patterns, &g_Figures, _Symbol, PERIOD_H1);
   Print("Strategy Donchian Breakout: Initialized for ", _Symbol, " on H1 timeframe");
   
+  // Инициализация стратегии MA Cross
+  g_Strategy_MA_Cross.Initialize(&g_Patterns, &g_Figures, _Symbol, PERIOD_H1);
+  Print("Strategy MA Cross: Initialized for ", _Symbol, " on H1 timeframe");
+  
   // Инициализация центрального Resolver (Мозг системы)
   g_Resolver.Initialize(&g_Figures, &g_Patterns);
   Print("Central Resolver: Initialized - The Brain is ready");
@@ -140,10 +146,11 @@ int OnInit()
   Print("- Fibonacci visualization: Retracement and extension levels");
   Print("- Confluence zones: Multi-level analysis");
   
-  Print("=== SPRINT 2 & 3 INTEGRATION COMPLETE ===");
+  Print("=== SPRINT 2 & 3 FINAL INTEGRATION COMPLETE ===");
   Print("Flat Strategies: Night MR, Channel Boundary, False Breakout");
-  Print("Trend Strategies: DualMA Anchor, Donchian Breakout");
-  Print("AI Decision Engine: Resolver with Conflict/Confluence Matrix active");
+  Print("Trend Strategies: DualMA Anchor, Donchian Breakout, MA Cross");
+  Print("AI Decision Engine: Resolver with Flexible Filters & Countertrend Protocol");
+  Print("Advanced Features: Conflict/Confluence Matrix, Session Filters, Volume Analysis");
   Print("Visual Layer: Full TA visualization system ready");
   
   return(INIT_SUCCEEDED);
@@ -474,6 +481,16 @@ void OnTick(){
           signal_candidates[candidates_count] = donchian_signal;
           candidates_count++;
           Print("Donchian Breakout Signal: ", donchian_signal.signal_reason);
+      }
+  }
+  
+  // 6. Стратегия MA Cross (работает в тренде)
+  if (g_currentRegime == REGIME_TREND_STRONG || g_currentRegime == REGIME_TREND_WEAKENING) {
+      SignalCandidate ma_cross_signal = g_Strategy_MA_Cross.GetSignal(g_currentRegime);
+      if (ma_cross_signal.isValid && candidates_count < 10) {
+          signal_candidates[candidates_count] = ma_cross_signal;
+          candidates_count++;
+          Print("MA Cross Signal: ", ma_cross_signal.signal_reason);
       }
   }
   
