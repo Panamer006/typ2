@@ -863,4 +863,243 @@ private:
         double slope = (y2 - y1) / (x2 - x1);
         return MathArctan(slope) * 180.0 / M_PI;
     }
+    
+    // === РАСШИРЕННЫЕ МЕТОДЫ ВИЗУАЛИЗАЦИИ ===
+    
+    /**
+     * @brief Визуализация фигуры с расширенными возможностями
+     * @param figure_info Информация о фигуре
+     * @param chart_id ID графика
+     * @param rates Массив ценовых данных
+     */
+    void DrawFigureAdvanced(const FigureInfo &figure_info, long chart_id, const MqlRates &rates[]) const {
+        if(figure_info.figure_name == "None") return;
+        
+        // Определяем цвет в зависимости от надежности
+        color figure_color;
+        if(figure_info.reliability > 0.8) figure_color = clrLime;
+        else if(figure_info.reliability > 0.6) figure_color = clrGreen;
+        else if(figure_info.reliability > 0.4) figure_color = clrYellow;
+        else figure_color = clrOrange;
+        
+        // Рисуем основную фигуру
+        DrawFigure(figure_info, chart_id, rates);
+        
+        // Добавляем расширенную информацию
+        string info_name = StringFormat("Figure_Info_%s_%d", figure_info.figure_name, (int)TimeCurrent());
+        ObjectDelete(chart_id, info_name);
+        
+        if(ObjectCreate(chart_id, info_name, OBJ_TEXT, 0, figure_info.breakout_time, figure_info.breakout_price)) {
+            ObjectSetString(chart_id, info_name, OBJPROP_TEXT, 
+                          StringFormat("%s (%.1f%%) | Target: %.5f", 
+                                     figure_info.figure_name, 
+                                     figure_info.reliability * 100,
+                                     figure_info.target_price));
+            ObjectSetInteger(chart_id, info_name, OBJPROP_COLOR, figure_color);
+            ObjectSetInteger(chart_id, info_name, OBJPROP_FONTSIZE, 9);
+            ObjectSetInteger(chart_id, info_name, OBJPROP_ANCHOR, ANCHOR_LOWER);
+        }
+    }
+    
+    /**
+     * @brief Визуализация фигуры с зоной влияния
+     * @param figure_info Информация о фигуре
+     * @param chart_id ID графика
+     * @param rates Массив ценовых данных
+     * @param influence_bars Количество баров зоны влияния
+     */
+    void DrawFigureWithInfluence(const FigureInfo &figure_info, long chart_id, 
+                                const MqlRates &rates[], int influence_bars = 10) const {
+        if(figure_info.figure_name == "None") return;
+        
+        // Рисуем основную фигуру
+        DrawFigure(figure_info, chart_id, rates);
+        
+        // Определяем цвет зоны влияния
+        color zone_color = (figure_info.reliability > 0.6) ? C'0,255,0,30' : C'255,165,0,30';
+        
+        string zone_name = StringFormat("Figure_Zone_%s_%d", figure_info.figure_name, (int)TimeCurrent());
+        ObjectDelete(chart_id, zone_name);
+        
+        // Находим экстремумы в зоне влияния
+        double high_price = figure_info.breakout_price;
+        double low_price = figure_info.breakout_price;
+        
+        for(int i = 0; i < MathMin(influence_bars, ArraySize(rates)); i++) {
+            if(rates[i].high > high_price) high_price = rates[i].high;
+            if(rates[i].low < low_price) low_price = rates[i].low;
+        }
+        
+        datetime start_time = figure_info.breakout_time;
+        datetime end_time = (influence_bars < ArraySize(rates)) ? 
+                           rates[influence_bars].time : rates[ArraySize(rates)-1].time;
+        
+        if(ObjectCreate(chart_id, zone_name, OBJ_RECTANGLE, 0, start_time, high_price, end_time, low_price)) {
+            ObjectSetInteger(chart_id, zone_name, OBJPROP_COLOR, zone_color);
+            ObjectSetInteger(chart_id, zone_name, OBJPROP_FILL, true);
+            ObjectSetInteger(chart_id, zone_name, OBJPROP_BACK, true);
+            ObjectSetInteger(chart_id, zone_name, OBJPROP_STYLE, STYLE_SOLID);
+            ObjectSetInteger(chart_id, zone_name, OBJPROP_WIDTH, 1);
+        }
+    }
+    
+    /**
+     * @brief Визуализация фигуры с целевыми уровнями
+     * @param figure_info Информация о фигуре
+     * @param chart_id ID графика
+     * @param rates Массив ценовых данных
+     * @param target_levels Массив целевых уровней
+     * @param target_count Количество целевых уровней
+     */
+    void DrawFigureWithTargets(const FigureInfo &figure_info, long chart_id, 
+                              const MqlRates &rates[], const double &target_levels[], int target_count) const {
+        if(figure_info.figure_name == "None" || target_count <= 0) return;
+        
+        // Рисуем основную фигуру
+        DrawFigure(figure_info, chart_id, rates);
+        
+        // Определяем цвет целей
+        color target_color = (figure_info.reliability > 0.6) ? clrDodgerBlue : clrSteelBlue;
+        
+        // Рисуем целевые уровни
+        for(int i = 0; i < target_count; i++) {
+            string target_name = StringFormat("Figure_Target_%s_%d_%d", figure_info.figure_name, i, (int)TimeCurrent());
+            ObjectDelete(chart_id, target_name);
+            
+            if(ObjectCreate(chart_id, target_name, OBJ_HLINE, 0, 0, target_levels[i])) {
+                ObjectSetInteger(chart_id, target_name, OBJPROP_COLOR, target_color);
+                ObjectSetInteger(chart_id, target_name, OBJPROP_STYLE, STYLE_DOT);
+                ObjectSetInteger(chart_id, target_name, OBJPROP_WIDTH, 2);
+                ObjectSetString(chart_id, target_name, OBJPROP_TEXT, 
+                              StringFormat("Target %d: %.5f", i+1, target_levels[i]));
+            }
+        }
+    }
+    
+    /**
+     * @brief Визуализация фигуры с уровнями поддержки/сопротивления
+     * @param figure_info Информация о фигуре
+     * @param chart_id ID графика
+     * @param rates Массив ценовых данных
+     * @param support_levels Массив уровней поддержки
+     * @param resistance_levels Массив уровней сопротивления
+     * @param support_count Количество уровней поддержки
+     * @param resistance_count Количество уровней сопротивления
+     */
+    void DrawFigureWithLevels(const FigureInfo &figure_info, long chart_id, 
+                             const MqlRates &rates[], 
+                             const double &support_levels[], const double &resistance_levels[],
+                             int support_count, int resistance_count) const {
+        if(figure_info.figure_name == "None") return;
+        
+        // Рисуем основную фигуру
+        DrawFigure(figure_info, chart_id, rates);
+        
+        // Определяем цвет уровней
+        color support_color = clrBlue;
+        color resistance_color = clrRed;
+        
+        // Рисуем уровни поддержки
+        for(int i = 0; i < support_count; i++) {
+            string support_name = StringFormat("Figure_Support_%s_%d_%d", figure_info.figure_name, i, (int)TimeCurrent());
+            ObjectDelete(chart_id, support_name);
+            
+            if(ObjectCreate(chart_id, support_name, OBJ_HLINE, 0, 0, support_levels[i])) {
+                ObjectSetInteger(chart_id, support_name, OBJPROP_COLOR, support_color);
+                ObjectSetInteger(chart_id, support_name, OBJPROP_STYLE, STYLE_DASH);
+                ObjectSetInteger(chart_id, support_name, OBJPROP_WIDTH, 2);
+                ObjectSetString(chart_id, support_name, OBJPROP_TEXT, 
+                              StringFormat("Support %d: %.5f", i+1, support_levels[i]));
+            }
+        }
+        
+        // Рисуем уровни сопротивления
+        for(int i = 0; i < resistance_count; i++) {
+            string resistance_name = StringFormat("Figure_Resistance_%s_%d_%d", figure_info.figure_name, i, (int)TimeCurrent());
+            ObjectDelete(chart_id, resistance_name);
+            
+            if(ObjectCreate(chart_id, resistance_name, OBJ_HLINE, 0, 0, resistance_levels[i])) {
+                ObjectSetInteger(chart_id, resistance_name, OBJPROP_COLOR, resistance_color);
+                ObjectSetInteger(chart_id, resistance_name, OBJPROP_STYLE, STYLE_DASH);
+                ObjectSetInteger(chart_id, resistance_name, OBJPROP_WIDTH, 2);
+                ObjectSetString(chart_id, resistance_name, OBJPROP_TEXT, 
+                              StringFormat("Resistance %d: %.5f", i+1, resistance_levels[i]));
+            }
+        }
+    }
+    
+    /**
+     * @brief Визуализация фигуры с линиями тренда
+     * @param figure_info Информация о фигуре
+     * @param chart_id ID графика
+     * @param rates Массив ценовых данных
+     * @param trend_lines Массив структур линий тренда
+     * @param line_count Количество линий тренда
+     */
+    void DrawFigureWithTrendLines(const FigureInfo &figure_info, long chart_id, 
+                                 const MqlRates &rates[], const TrendLine &trend_lines[], int line_count) const {
+        if(figure_info.figure_name == "None" || line_count <= 0) return;
+        
+        // Рисуем основную фигуру
+        DrawFigure(figure_info, chart_id, rates);
+        
+        // Рисуем линии тренда
+        for(int i = 0; i < line_count; i++) {
+            string line_name = StringFormat("Figure_TrendLine_%s_%d_%d", figure_info.figure_name, i, (int)TimeCurrent());
+            ObjectDelete(chart_id, line_name);
+            
+            if(ObjectCreate(chart_id, line_name, OBJ_TREND, 0, 
+                           trend_lines[i].start_time, trend_lines[i].start_price,
+                           trend_lines[i].end_time, trend_lines[i].end_price)) {
+                ObjectSetInteger(chart_id, line_name, OBJPROP_COLOR, trend_lines[i].color);
+                ObjectSetInteger(chart_id, line_name, OBJPROP_STYLE, trend_lines[i].style);
+                ObjectSetInteger(chart_id, line_name, OBJPROP_WIDTH, trend_lines[i].width);
+                ObjectSetInteger(chart_id, line_name, OBJPROP_RAY_RIGHT, true);
+                ObjectSetString(chart_id, line_name, OBJPROP_TEXT, 
+                              StringFormat("Trend Line %d", i+1));
+            }
+        }
+    }
+    
+    /**
+     * @brief Визуализация фигуры с анимацией
+     * @param figure_info Информация о фигуре
+     * @param chart_id ID графика
+     * @param rates Массив ценовых данных
+     * @param animation_speed Скорость анимации (мс)
+     */
+    void DrawFigureWithAnimation(const FigureInfo &figure_info, long chart_id, 
+                                const MqlRates &rates[], int animation_speed = 1000) const {
+        if(figure_info.figure_name == "None") return;
+        
+        // Создаем анимированную стрелку
+        string arrow_name = StringFormat("Figure_Animated_%s_%d", figure_info.figure_name, (int)TimeCurrent());
+        ObjectDelete(chart_id, arrow_name);
+        
+        if(ObjectCreate(chart_id, arrow_name, OBJ_ARROW, 0, figure_info.breakout_time, figure_info.breakout_price)) {
+            ObjectSetInteger(chart_id, arrow_name, OBJPROP_ARROWCODE, 233);
+            ObjectSetInteger(chart_id, arrow_name, OBJPROP_COLOR, clrYellow);
+            ObjectSetInteger(chart_id, arrow_name, OBJPROP_WIDTH, 5);
+            
+            // Добавляем мигающий эффект
+            ObjectSetInteger(chart_id, arrow_name, OBJPROP_BACK, false);
+        }
+        
+        // Рисуем основную фигуру
+        DrawFigure(figure_info, chart_id, rates);
+    }
+    
+    /**
+     * @brief Очистка всех объектов визуализации фигур
+     * @param chart_id ID графика
+     */
+    void ClearFigureVisualization(long chart_id) const {
+        int total_objects = ObjectsTotal(chart_id);
+        for(int i = total_objects - 1; i >= 0; i--) {
+            string obj_name = ObjectName(chart_id, i);
+            if(StringFind(obj_name, "Figure_") == 0) {
+                ObjectDelete(chart_id, obj_name);
+            }
+        }
+    }
 };

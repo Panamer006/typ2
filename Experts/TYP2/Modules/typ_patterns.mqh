@@ -836,4 +836,206 @@ private:
     double GetCandleRange(const MqlRates &candle) const {
         return candle.high - candle.low;
     }
+    
+    // === РАСШИРЕННЫЕ МЕТОДЫ ВИЗУАЛИЗАЦИИ ===
+    
+    /**
+     * @brief Визуализация паттерна с указанием направления
+     * @param pattern_name Название паттерна
+     * @param shift Смещение бара
+     * @param chart_id ID графика
+     * @param rates Массив ценовых данных
+     * @param strength Сила паттерна
+     * @param is_bullish true для бычьего паттерна, false для медвежьего
+     */
+    void DrawPatternWithDirection(const string pattern_name, int shift, long chart_id, 
+                                 const MqlRates &rates[], double strength, bool is_bullish) const {
+        if(pattern_name == "None") return;
+        
+        datetime bar_time = rates[shift].time;
+        double price_level = is_bullish ? 
+                           rates[shift].high + (rates[shift].high - rates[shift].low) * 0.1 :
+                           rates[shift].low - (rates[shift].high - rates[shift].low) * 0.1;
+        
+        // Определяем цвет в зависимости от направления и силы
+        color pattern_color;
+        if(is_bullish) {
+            if(strength > 0.8) pattern_color = clrLime;
+            else if(strength > 0.6) pattern_color = clrGreen;
+            else if(strength > 0.4) pattern_color = clrYellowGreen;
+            else pattern_color = clrLightGreen;
+        } else {
+            if(strength > 0.8) pattern_color = clrRed;
+            else if(strength > 0.6) pattern_color = clrCrimson;
+            else if(strength > 0.4) pattern_color = clrOrange;
+            else pattern_color = clrLightCoral;
+        }
+        
+        string object_name = StringFormat("Pattern_%s_%s_%d_%d", 
+                                        is_bullish ? "BULL" : "BEAR", pattern_name, shift, (int)bar_time);
+        ObjectDelete(chart_id, object_name);
+        
+        if(ObjectCreate(chart_id, object_name, OBJ_TEXT, 0, bar_time, price_level)) {
+            string direction_text = is_bullish ? "BULL" : "BEAR";
+            ObjectSetString(chart_id, object_name, OBJPROP_TEXT, 
+                          StringFormat("%s %s (%.1f%%)", direction_text, pattern_name, strength * 100));
+            ObjectSetInteger(chart_id, object_name, OBJPROP_COLOR, pattern_color);
+            ObjectSetInteger(chart_id, object_name, OBJPROP_FONTSIZE, 8);
+            ObjectSetInteger(chart_id, object_name, OBJPROP_ANCHOR, is_bullish ? ANCHOR_LOWER : ANCHOR_UPPER);
+        }
+        
+        // Добавляем стрелку направления
+        string arrow_name = object_name + "_arrow";
+        ObjectDelete(chart_id, arrow_name);
+        
+        int arrow_code = is_bullish ? 233 : 234; // Стрелка вверх или вниз
+        double arrow_price = is_bullish ? rates[shift].low - 5*_Point : rates[shift].high + 5*_Point;
+        
+        if(ObjectCreate(chart_id, arrow_name, OBJ_ARROW, 0, bar_time, arrow_price)) {
+            ObjectSetInteger(chart_id, arrow_name, OBJPROP_ARROWCODE, arrow_code);
+            ObjectSetInteger(chart_id, arrow_name, OBJPROP_COLOR, pattern_color);
+            ObjectSetInteger(chart_id, arrow_name, OBJPROP_WIDTH, 3);
+        }
+    }
+    
+    /**
+     * @brief Визуализация паттерна с зоной влияния
+     * @param pattern_name Название паттерна
+     * @param shift Смещение бара
+     * @param chart_id ID графика
+     * @param rates Массив ценовых данных
+     * @param strength Сила паттерна
+     * @param influence_bars Количество баров зоны влияния
+     */
+    void DrawPatternWithInfluence(const string pattern_name, int shift, long chart_id, 
+                                 const MqlRates &rates[], double strength, int influence_bars = 5) const {
+        if(pattern_name == "None") return;
+        
+        // Сначала рисуем основной паттерн
+        DrawPattern(pattern_name, shift, chart_id, rates, strength);
+        
+        // Определяем цвет зоны влияния (полупрозрачный)
+        color zone_color = (strength > 0.6) ? C'0,255,0,50' : C'255,165,0,50';
+        
+        string zone_name = StringFormat("Pattern_Zone_%s_%d_%d", pattern_name, shift, (int)rates[shift].time);
+        ObjectDelete(chart_id, zone_name);
+        
+        datetime start_time = rates[shift].time;
+        datetime end_time = (shift + influence_bars < ArraySize(rates)) ? 
+                           rates[shift + influence_bars].time : rates[ArraySize(rates)-1].time;
+        
+        double high_price = rates[shift].high;
+        double low_price = rates[shift].low;
+        
+        // Находим экстремумы в зоне влияния
+        for(int i = shift; i < MathMin(shift + influence_bars, ArraySize(rates)); i++) {
+            if(rates[i].high > high_price) high_price = rates[i].high;
+            if(rates[i].low < low_price) low_price = rates[i].low;
+        }
+        
+        if(ObjectCreate(chart_id, zone_name, OBJ_RECTANGLE, 0, start_time, high_price, end_time, low_price)) {
+            ObjectSetInteger(chart_id, zone_name, OBJPROP_COLOR, zone_color);
+            ObjectSetInteger(chart_id, zone_name, OBJPROP_FILL, true);
+            ObjectSetInteger(chart_id, zone_name, OBJPROP_BACK, true);
+            ObjectSetInteger(chart_id, zone_name, OBJPROP_STYLE, STYLE_SOLID);
+            ObjectSetInteger(chart_id, zone_name, OBJPROP_WIDTH, 1);
+        }
+    }
+    
+    /**
+     * @brief Визуализация паттерна с уровнями поддержки/сопротивления
+     * @param pattern_name Название паттерна
+     * @param shift Смещение бара
+     * @param chart_id ID графика
+     * @param rates Массив ценовых данных
+     * @param strength Сила паттерна
+     * @param support_level Уровень поддержки
+     * @param resistance_level Уровень сопротивления
+     */
+    void DrawPatternWithLevels(const string pattern_name, int shift, long chart_id, 
+                              const MqlRates &rates[], double strength, 
+                              double support_level, double resistance_level) const {
+        if(pattern_name == "None") return;
+        
+        // Рисуем основной паттерн
+        DrawPattern(pattern_name, shift, chart_id, rates, strength);
+        
+        // Определяем цвет уровней
+        color level_color = (strength > 0.6) ? clrBlue : clrGray;
+        
+        // Рисуем уровень поддержки
+        if(support_level > 0) {
+            string support_name = StringFormat("Pattern_Support_%s_%d_%d", pattern_name, shift, (int)rates[shift].time);
+            ObjectDelete(chart_id, support_name);
+            
+            if(ObjectCreate(chart_id, support_name, OBJ_HLINE, 0, 0, support_level)) {
+                ObjectSetInteger(chart_id, support_name, OBJPROP_COLOR, level_color);
+                ObjectSetInteger(chart_id, support_name, OBJPROP_STYLE, STYLE_DASH);
+                ObjectSetInteger(chart_id, support_name, OBJPROP_WIDTH, 2);
+                ObjectSetString(chart_id, support_name, OBJPROP_TEXT, StringFormat("Support: %.5f", support_level));
+            }
+        }
+        
+        // Рисуем уровень сопротивления
+        if(resistance_level > 0) {
+            string resistance_name = StringFormat("Pattern_Resistance_%s_%d_%d", pattern_name, shift, (int)rates[shift].time);
+            ObjectDelete(chart_id, resistance_name);
+            
+            if(ObjectCreate(chart_id, resistance_name, OBJ_HLINE, 0, 0, resistance_level)) {
+                ObjectSetInteger(chart_id, resistance_name, OBJPROP_COLOR, level_color);
+                ObjectSetInteger(chart_id, resistance_name, OBJPROP_STYLE, STYLE_DASH);
+                ObjectSetInteger(chart_id, resistance_name, OBJPROP_WIDTH, 2);
+                ObjectSetString(chart_id, resistance_name, OBJPROP_TEXT, StringFormat("Resistance: %.5f", resistance_level));
+            }
+        }
+    }
+    
+    /**
+     * @brief Визуализация паттерна с целевыми уровнями
+     * @param pattern_name Название паттерна
+     * @param shift Смещение бара
+     * @param chart_id ID графика
+     * @param rates Массив ценовых данных
+     * @param strength Сила паттерна
+     * @param target_levels Массив целевых уровней
+     * @param target_count Количество целевых уровней
+     */
+    void DrawPatternWithTargets(const string pattern_name, int shift, long chart_id, 
+                               const MqlRates &rates[], double strength, 
+                               const double &target_levels[], int target_count) const {
+        if(pattern_name == "None" || target_count <= 0) return;
+        
+        // Рисуем основной паттерн
+        DrawPattern(pattern_name, shift, chart_id, rates, strength);
+        
+        // Определяем цвет целей
+        color target_color = (strength > 0.6) ? clrDodgerBlue : clrSteelBlue;
+        
+        // Рисуем целевые уровни
+        for(int i = 0; i < target_count; i++) {
+            string target_name = StringFormat("Pattern_Target_%s_%d_%d_%d", pattern_name, shift, i, (int)rates[shift].time);
+            ObjectDelete(chart_id, target_name);
+            
+            if(ObjectCreate(chart_id, target_name, OBJ_HLINE, 0, 0, target_levels[i])) {
+                ObjectSetInteger(chart_id, target_name, OBJPROP_COLOR, target_color);
+                ObjectSetInteger(chart_id, target_name, OBJPROP_STYLE, STYLE_DOT);
+                ObjectSetInteger(chart_id, target_name, OBJPROP_WIDTH, 1);
+                ObjectSetString(chart_id, target_name, OBJPROP_TEXT, StringFormat("Target %d: %.5f", i+1, target_levels[i]));
+            }
+        }
+    }
+    
+    /**
+     * @brief Очистка всех объектов визуализации паттернов
+     * @param chart_id ID графика
+     */
+    void ClearPatternVisualization(long chart_id) const {
+        int total_objects = ObjectsTotal(chart_id);
+        for(int i = total_objects - 1; i >= 0; i--) {
+            string obj_name = ObjectName(chart_id, i);
+            if(StringFind(obj_name, "Pattern_") == 0) {
+                ObjectDelete(chart_id, obj_name);
+            }
+        }
+    }
 };

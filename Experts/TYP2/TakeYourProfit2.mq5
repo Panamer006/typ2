@@ -112,9 +112,17 @@ int OnInit()
   g_Resolver.Initialize(&g_Figures, &g_Patterns);
   Print("Central Resolver: Initialized - The Brain is ready");
   
+  // Инициализация визуального слоя
+  Print("Visualization Layer: Initialized");
+  Print("- Pattern visualization: Color-coded strength indicators");
+  Print("- Figure visualization: Trend lines and target levels");
+  Print("- Fibonacci visualization: Retracement and extension levels");
+  Print("- Confluence zones: Multi-level analysis");
+  
   Print("=== SPRINT 2 INTEGRATION COMPLETE ===");
   Print("Active Strategies: Night MR, Channel Boundary, False Breakout");
   Print("AI Decision Engine: Resolver with hierarchical logic active");
+  Print("Visual Layer: Full TA visualization system ready");
   
   return(INIT_SUCCEEDED);
 }
@@ -485,6 +493,10 @@ void OnTick(){
       }
   }
   
+  // === БЛОК ВИЗУАЛИЗАЦИИ ТЕХНИЧЕСКОГО АНАЛИЗА ===
+  // Визуализируем найденные паттерны, фигуры и уровни Фибоначчи
+  VisualizeTechnicalAnalysis();
+  
   // === ДЕМОНСТРАЦИОННАЯ ТОРГОВАЯ ЛОГИКА ===
   // Симулируем получение торгового сигнала
   DemoTradingLogic();
@@ -500,6 +512,148 @@ void OnTick(){
     tick_counter = 0;
     Print("Current Market Regime: ", g_RegimeEngine.GetCurrentRegimeString());
   }
+}
+
+/**
+ * @brief Функция визуализации технического анализа
+ * 
+ * Отображает на графике:
+ * - Найденные свечные паттерны с цветовой индикацией силы
+ * - Графические фигуры с линиями тренда и целевыми уровнями
+ * - Уровни Фибоначчи с confluence зонами
+ */
+void VisualizeTechnicalAnalysis() {
+  static datetime last_visualization_time = 0;
+  datetime current_time = TimeCurrent();
+  
+  // Обновляем визуализацию каждые 5 минут
+  if(current_time - last_visualization_time < 300) return;
+  last_visualization_time = current_time;
+  
+  long chart_id = ChartID();
+  
+  // === ВИЗУАЛИЗАЦИЯ ПАТТЕРНОВ ===
+  MqlRates rates[50];
+  if(CopyRates(_Symbol, PERIOD_H1, 0, 50, rates) >= 10) {
+    
+    // Поиск бычьих паттернов
+    for(int i = 1; i < 10; i++) {
+      string pattern_name;
+      bool has_pattern = g_Patterns.FindAnyBullishPattern(rates, i, pattern_name);
+      
+      if(has_pattern) {
+        double pattern_strength = g_Patterns.GetPatternStrength(rates, i, pattern_name);
+        
+        // Используем расширенную визуализацию с направлением
+        g_Patterns.DrawPatternWithDirection(pattern_name, i, chart_id, rates, pattern_strength, true);
+        
+        // Добавляем зону влияния для сильных паттернов
+        if(pattern_strength > 0.6) {
+          g_Patterns.DrawPatternWithInfluence(pattern_name, i, chart_id, rates, pattern_strength, 5);
+        }
+      }
+    }
+    
+    // Поиск медвежьих паттернов
+    for(int i = 1; i < 10; i++) {
+      string pattern_name;
+      bool has_pattern = g_Patterns.FindAnyBearishPattern(rates, i, pattern_name);
+      
+      if(has_pattern) {
+        double pattern_strength = g_Patterns.GetPatternStrength(rates, i, pattern_name);
+        
+        // Используем расширенную визуализацию с направлением
+        g_Patterns.DrawPatternWithDirection(pattern_name, i, chart_id, rates, pattern_strength, false);
+        
+        // Добавляем зону влияния для сильных паттернов
+        if(pattern_strength > 0.6) {
+          g_Patterns.DrawPatternWithInfluence(pattern_name, i, chart_id, rates, pattern_strength, 5);
+        }
+      }
+    }
+  }
+  
+  // === ВИЗУАЛИЗАЦИЯ ГРАФИЧЕСКИХ ФИГУР ===
+  double highs[100], lows[100];
+  if(CopyHigh(_Symbol, PERIOD_H4, 0, 100, highs) >= 50 && 
+     CopyLow(_Symbol, PERIOD_H4, 0, 100, lows) >= 50) {
+    
+    FigureInfo figure_info;
+    
+    // Поиск фигуры "Голова и Плечи"
+    if(g_Figures.DetectHeadAndShoulders(highs, lows, 50, figure_info)) {
+      g_Figures.DrawFigureAdvanced(figure_info, chart_id, rates);
+      
+      // Добавляем зону влияния для надежных фигур
+      if(figure_info.reliability > 0.6) {
+        g_Figures.DrawFigureWithInfluence(figure_info, chart_id, rates, 10);
+      }
+    }
+    
+    // Поиск двойной вершины
+    if(g_Figures.DetectDoubleTopBottom(highs, lows, 40, figure_info, true)) {
+      g_Figures.DrawFigureAdvanced(figure_info, chart_id, rates);
+    }
+    
+    // Поиск двойного дна
+    if(g_Figures.DetectDoubleTopBottom(highs, lows, 40, figure_info, false)) {
+      g_Figures.DrawFigureAdvanced(figure_info, chart_id, rates);
+    }
+    
+    // Поиск клиньев
+    if(g_Figures.DetectWedge(highs, lows, 40, figure_info)) {
+      g_Figures.DrawFigureAdvanced(figure_info, chart_id, rates);
+    }
+  }
+  
+  // === ВИЗУАЛИЗАЦИЯ УРОВНЕЙ ФИБОНАЧЧИ ===
+  FiboGrid fibo_grid;
+  if(g_Fibo.BuildFiboGrid(_Symbol, PERIOD_H1, fibo_grid)) {
+    
+    // Анализируем confluence
+    int confluence_zones = g_Fibo.AnalyzeFiboConfluence(_Symbol, PERIOD_H1, fibo_grid);
+    
+    if(confluence_zones > 0) {
+      // Рисуем с confluence зонами
+      g_Fibo.DrawFiboWithConfluence(fibo_grid, chart_id, _Symbol);
+    } else {
+      // Рисуем обычную сетку
+      g_Fibo.DrawFiboGrid(fibo_grid, chart_id, _Symbol);
+    }
+    
+    // Проверяем текущую цену на confluence
+    double current_price = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+    if(g_Fibo.IsInFiboCluster(_Symbol, PERIOD_H1, current_price)) {
+      Print("=== FIBONACCI CONFLUENCE DETECTED ===");
+      Print("Current price: ", DoubleToString(current_price, _Digits));
+      Print("Price is near significant Fibonacci level");
+    }
+  }
+  
+  // === ОЧИСТКА СТАРЫХ ОБЪЕКТОВ ===
+  // Очищаем объекты старше 1 часа
+  static datetime last_cleanup = 0;
+  if(current_time - last_cleanup > 3600) {
+    last_cleanup = current_time;
+    
+    int total_objects = ObjectsTotal(chart_id);
+    for(int i = total_objects - 1; i >= 0; i--) {
+      string obj_name = ObjectName(chart_id, i);
+      datetime obj_time = (datetime)ObjectGetInteger(chart_id, obj_name, OBJPROP_TIME);
+      
+      // Удаляем объекты старше 1 часа
+      if(current_time - obj_time > 3600) {
+        if(StringFind(obj_name, "Pattern_") == 0 || 
+           StringFind(obj_name, "Figure_") == 0 || 
+           StringFind(obj_name, "Fibo") == 0) {
+          ObjectDelete(chart_id, obj_name);
+        }
+      }
+    }
+  }
+  
+  // Обновляем график
+  ChartRedraw(chart_id);
 }
 
 

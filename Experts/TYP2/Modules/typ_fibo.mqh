@@ -1,385 +1,308 @@
 // --- typ_fibo.mqh ---
 // (c) 2025, Take Your Profit 2.0 Project
-// Sprint 2 :: Fibonacci Levels Analysis Module
+// Sprint 2 :: Fibonacci Analysis Module with Full Visualization
 #property copyright "TYP2"
 
 /**
- * @brief Модуль анализа уровней Фибоначчи
- * 
- * Предоставляет функциональность для автоматического расчета и анализа
- * уровней Фибоначчи, включая кластерный анализ и определение ключевых зон.
+ * @brief Структура для хранения информации о Фибоначчи уровне
+ */
+struct FiboLevel {
+    double price;           // Цена уровня
+    double percentage;      // Процент Фибоначчи
+    string level_name;      // Название уровня
+    color level_color;      // Цвет для визуализации
+    int line_style;         // Стиль линии
+    int line_width;         // Толщина линии
+    bool is_strong;         // Сильный уровень
+    int confluence_count;   // Количество совпадений
+    
+    FiboLevel() {
+        price = 0.0;
+        percentage = 0.0;
+        level_name = "";
+        level_color = clrGray;
+        line_style = STYLE_DOT;
+        line_width = 1;
+        is_strong = false;
+        confluence_count = 0;
+    }
+};
+
+/**
+ * @brief Структура для хранения информации о Фибоначчи сетке
+ */
+struct FiboGrid {
+    double swing_high;      // Максимум свинга
+    double swing_low;       // Минимум свинга
+    datetime high_time;     // Время максимума
+    datetime low_time;      // Время минимума
+    FiboLevel levels[20];   // Массив уровней
+    int level_count;        // Количество уровней
+    bool is_valid;          // Валидность сетки
+    
+    FiboGrid() {
+        swing_high = 0.0;
+        swing_low = 0.0;
+        high_time = 0;
+        low_time = 0;
+        level_count = 0;
+        is_valid = false;
+    }
+};
+
+/**
+ * @brief Модуль анализа уровней Фибоначчи с полной визуализацией
  */
 class CFibo {
+private:
+    double m_retracement_levels[5];
+    double m_extension_levels[4];
+    string m_level_names[9];
+    color m_level_colors[9];
+    int m_min_swing_bars;
+    double m_min_swing_pips;
+    int m_lookback_period;
+    double m_confluence_tolerance;
+    
 public:
-    /**
-     * @brief Конструктор модуля Фибоначчи
-     */
-    CFibo() {
-        // Инициализируем стандартные уровни Фибоначчи
-        InitializeStandardLevels();
+    CFibo() : m_min_swing_bars(5),
+              m_min_swing_pips(20.0),
+              m_lookback_period(100),
+              m_confluence_tolerance(5.0)
+    {
+        m_retracement_levels[0] = 23.6;
+        m_retracement_levels[1] = 38.2;
+        m_retracement_levels[2] = 50.0;
+        m_retracement_levels[3] = 61.8;
+        m_retracement_levels[4] = 78.6;
+        
+        m_extension_levels[0] = 127.2;
+        m_extension_levels[1] = 161.8;
+        m_extension_levels[2] = 200.0;
+        m_extension_levels[3] = 261.8;
+        
+        m_level_names[0] = "23.6% Ret";
+        m_level_names[1] = "38.2% Ret";
+        m_level_names[2] = "50.0% Ret";
+        m_level_names[3] = "61.8% Ret";
+        m_level_names[4] = "78.6% Ret";
+        m_level_names[5] = "127.2% Ext";
+        m_level_names[6] = "161.8% Ext";
+        m_level_names[7] = "200.0% Ext";
+        m_level_names[8] = "261.8% Ext";
+        
+        m_level_colors[0] = clrLightBlue;
+        m_level_colors[1] = clrBlue;
+        m_level_colors[2] = clrDodgerBlue;
+        m_level_colors[3] = clrSteelBlue;
+        m_level_colors[4] = clrDarkBlue;
+        m_level_colors[5] = clrOrange;
+        m_level_colors[6] = clrRed;
+        m_level_colors[7] = clrCrimson;
+        m_level_colors[8] = clrDarkRed;
     }
     
-    /**
-     * @brief Деструктор модуля Фибоначчи
-     */
     ~CFibo() {}
     
-    // --- ОСНОВНЫЕ УРОВНИ ФИБОНАЧЧИ ---
-    
-    /**
-     * @brief Расчет уровней коррекции Фибоначчи
-     * @param swing_high Максимум свинга
-     * @param swing_low Минимум свинга
-     * @param levels Массив рассчитанных уровней (выходной параметр)
-     * @return Количество рассчитанных уровней
-     * 
-     * TODO: Реализовать расчет стандартных уровней коррекции:
-     * - 0.0% (100% коррекция)
-     * - 23.6%
-     * - 38.2%
-     * - 50.0%
-     * - 61.8% (золотое сечение)
-     * - 78.6%
-     * - 100.0% (0% коррекция)
-     */
-    int CalculateRetracementLevels(double swing_high, double swing_low, double &levels[]) {
-        // Заглушка - возвращает 0 уровней
-        ArrayResize(levels, 0);
-        return 0;
+    bool FindSignificantSwing(const string symbol, ENUM_TIMEFRAMES timeframe,
+                             double &swing_high, double &swing_low,
+                             datetime &high_time, datetime &low_time) {
+        MqlRates rates[200];
+        if(CopyRates(symbol, timeframe, 0, m_lookback_period, rates) < m_lookback_period) {
+            return false;
+        }
+        
+        double max_high = 0, min_low = DBL_MAX;
+        int max_index = -1, min_index = -1;
+        
+        for(int i = m_min_swing_bars; i < m_lookback_period - m_min_swing_bars; i++) {
+            bool is_local_high = true, is_local_low = true;
+            
+            for(int j = i - m_min_swing_bars; j <= i + m_min_swing_bars; j++) {
+                if(j != i && rates[j].high >= rates[i].high) {
+                    is_local_high = false;
+                    break;
+                }
+            }
+            
+            for(int j = i - m_min_swing_bars; j <= i + m_min_swing_bars; j++) {
+                if(j != i && rates[j].low <= rates[i].low) {
+                    is_local_low = false;
+                    break;
+                }
+            }
+            
+            if(is_local_high && rates[i].high > max_high) {
+                max_high = rates[i].high;
+                max_index = i;
+            }
+            
+            if(is_local_low && rates[i].low < min_low) {
+                min_low = rates[i].low;
+                min_index = i;
+            }
+        }
+        
+        if(max_index == -1 || min_index == -1) return false;
+        
+        double swing_range = max_high - min_low;
+        double min_range = m_min_swing_pips * _Point;
+        
+        if(swing_range < min_range) return false;
+        
+        if(max_index < min_index) {
+            swing_low = min_low;
+            swing_high = max_high;
+            low_time = rates[min_index].time;
+            high_time = rates[max_index].time;
+        } else {
+            swing_high = max_high;
+            swing_low = min_low;
+            high_time = rates[max_index].time;
+            low_time = rates[min_index].time;
+        }
+        
+        return true;
     }
     
-    /**
-     * @brief Расчет уровней расширения Фибоначчи
-     * @param swing_high Максимум свинга
-     * @param swing_low Минимум свинга
-     * @param correction_level Уровень коррекции
-     * @param levels Массив рассчитанных уровней (выходной параметр)
-     * @return Количество рассчитанных уровней
-     * 
-     * TODO: Реализовать расчет стандартных уровней расширения:
-     * - 127.2%
-     * - 161.8%
-     * - 200.0%
-     * - 261.8%
-     * - 423.6%
-     */
-    int CalculateExtensionLevels(double swing_high, double swing_low, double correction_level, double &levels[]) {
-        // Заглушка
-        ArrayResize(levels, 0);
-        return 0;
+    bool BuildFiboGrid(const string symbol, ENUM_TIMEFRAMES timeframe, FiboGrid &fibo_grid) {
+        if(!FindSignificantSwing(symbol, timeframe, fibo_grid.swing_high, fibo_grid.swing_low,
+                                fibo_grid.high_time, fibo_grid.low_time)) {
+            return false;
+        }
+        
+        double swing_range = fibo_grid.swing_high - fibo_grid.swing_low;
+        int level_index = 0;
+        
+        for(int i = 0; i < 5; i++) {
+            double fibo_price = fibo_grid.swing_low + (swing_range * m_retracement_levels[i] / 100.0);
+            
+            fibo_grid.levels[level_index].price = fibo_price;
+            fibo_grid.levels[level_index].percentage = m_retracement_levels[i];
+            fibo_grid.levels[level_index].level_name = m_level_names[i];
+            fibo_grid.levels[level_index].level_color = m_level_colors[i];
+            fibo_grid.levels[level_index].line_style = STYLE_DASH;
+            fibo_grid.levels[level_index].line_width = 1;
+            fibo_grid.levels[level_index].is_strong = (m_retracement_levels[i] == 50.0 || m_retracement_levels[i] == 61.8);
+            fibo_grid.levels[level_index].confluence_count = 0;
+            
+            level_index++;
+        }
+        
+        for(int i = 0; i < 4; i++) {
+            double fibo_price = fibo_grid.swing_high + (swing_range * (m_extension_levels[i] - 100.0) / 100.0);
+            
+            fibo_grid.levels[level_index].price = fibo_price;
+            fibo_grid.levels[level_index].percentage = m_extension_levels[i];
+            fibo_grid.levels[level_index].level_name = m_level_names[level_index];
+            fibo_grid.levels[level_index].level_color = m_level_colors[level_index];
+            fibo_grid.levels[level_index].line_style = STYLE_DOT;
+            fibo_grid.levels[level_index].line_width = 1;
+            fibo_grid.levels[level_index].is_strong = (m_extension_levels[i] == 161.8 || m_extension_levels[i] == 200.0);
+            fibo_grid.levels[level_index].confluence_count = 0;
+            
+            level_index++;
+        }
+        
+        fibo_grid.level_count = level_index;
+        fibo_grid.is_valid = true;
+        
+        return true;
     }
     
-    /**
-     * @brief Проверка нахождения цены в кластерной зоне Фибоначчи
-     * @param price Текущая цена
-     * @param swing_high Максимум свинга
-     * @param swing_low Минимум свинга
-     * @param tolerance_pips Допустимое отклонение в пипсах
-     * @return true если цена находится в кластерной зоне
-     * 
-     * TODO: Реализовать логику определения кластера:
-     * - Поиск схождения нескольких уровней Фибо
-     * - Учет уровней с разных таймфреймов
-     * - Анализ исторической значимости уровней
-     * - Проверка confluence с другими техническими уровнями
-     */
-    bool IsInFiboCluster(double price, double swing_high, double swing_low, double tolerance_pips = 5.0) {
-        // Заглушка - всегда возвращает false
-        return false;
-    }
-    
-    // --- ПРОДВИНУТЫЕ МЕТОДЫ ФИБОНАЧЧИ ---
-    
-    /**
-     * @brief Расчет веерных линий Фибоначчи
-     * @param start_price Начальная цена
-     * @param end_price Конечная цена
-     * @param start_time Начальное время
-     * @param end_time Конечное время
-     * @param fan_levels Массив уровней веера (выходной параметр)
-     * @return Количество рассчитанных линий веера
-     * 
-     * TODO: Реализовать расчет веерных линий:
-     * - 38.2% линия
-     * - 50.0% линия
-     * - 61.8% линия
-     * - Учет временного фактора
-     */
-    int CalculateFanLines(double start_price, double end_price, datetime start_time, datetime end_time, double &fan_levels[]) {
-        ArrayResize(fan_levels, 0);
-        return 0;
-    }
-    
-    /**
-     * @brief Расчет временных зон Фибоначчи
-     * @param start_time Начальное время
-     * @param end_time Конечное время
-     * @param time_zones Массив временных зон (выходной параметр)
-     * @return Количество рассчитанных временных зон
-     * 
-     * TODO: Реализовать расчет временных зон:
-     * - Последовательность Фибоначчи для времени
-     * - 1, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89...
-     * - Проекция важных временных уровней
-     */
-    int CalculateTimeZones(datetime start_time, datetime end_time, datetime &time_zones[]) {
-        ArrayResize(time_zones, 0);
-        return 0;
-    }
-    
-    /**
-     * @brief Расчет дуг Фибоначчи
-     * @param center_price Центральная цена
-     * @param radius_price Радиус в цене
-     * @param arc_levels Массив уровней дуг (выходной параметр)
-     * @return Количество рассчитанных дуг
-     * 
-     * TODO: Реализовать расчет дуг Фибоначчи:
-     * - 38.2%, 50.0%, 61.8% от радиуса
-     * - Комбинация ценовых и временных факторов
-     */
-    int CalculateArcs(double center_price, double radius_price, double &arc_levels[]) {
-        ArrayResize(arc_levels, 0);
-        return 0;
-    }
-    
-    // --- АНАЛИЗ И КЛАСТЕРЫ ---
-    
-    /**
-     * @brief Мультитаймфреймовый анализ уровней Фибоначчи
-     * @param price Текущая цена
-     * @param timeframes Массив таймфреймов для анализа
-     * @param lookback Период поиска свингов
-     * @return Сила кластера от 0.0 до 1.0
-     * 
-     * TODO: Реализовать MTF анализ:
-     * - Поиск свингов на каждом таймфрейме
-     * - Расчет уровней для каждого таймфрейма
-     * - Определение схождения уровней
-     * - Взвешивание по важности таймфрейма
-     */
-    double AnalyzeMultiTimeframeCluster(double price, const ENUM_TIMEFRAMES &timeframes[], int lookback = 50) {
-        return 0.0; // Заглушка
-    }
-    
-    /**
-     * @brief Поиск ближайшего значимого уровня Фибоначчи
-     * @param current_price Текущая цена
-     * @param swing_high Максимум свинга
-     * @param swing_low Минимум свинга
-     * @param direction Направление поиска (1 - вверх, -1 - вниз)
-     * @param level_price Цена найденного уровня (выходной параметр)
-     * @param level_name Название уровня (выходной параметр)
-     * @return true если найден значимый уровень
-     */
-    bool FindNearestSignificantLevel(double current_price, double swing_high, double swing_low, 
-                                   int direction, double &level_price, string &level_name) {
-        level_price = current_price;
-        level_name = "None";
-        return false;
-    }
-    
-    /**
-     * @brief Расчет магнетизма уровня Фибоначчи
-     * @param price Текущая цена
-     * @param fibo_level Уровень Фибоначчи
-     * @param volume_data Данные об объемах
-     * @return Сила магнетизма от 0.0 до 1.0
-     * 
-     * TODO: Реализовать анализ магнетизма:
-     * - Расстояние до уровня
-     * - Историческая реакция на уровень
-     * - Объемы при касании уровня
-     * - Количество касаний уровня
-     */
-    double CalculateLevelMagnetism(double price, double fibo_level, const long &volume_data[]) {
-        return 0.5; // Нейтральный магнетизм
-    }
-    
-    // --- ТОРГОВЫЕ СИГНАЛЫ ---
-    
-    /**
-     * @brief Определение потенциала отскока от уровня Фибоначчи
-     * @param price Текущая цена
-     * @param fibo_level Уровень Фибоначчи
-     * @param approach_angle Угол подхода к уровню
-     * @param volume_confirmation Подтверждение объемами
-     * @return Вероятность отскока от 0.0 до 1.0
-     * 
-     * TODO: Реализовать анализ отскока:
-     * - Угол подхода к уровню (острый = сильнее)
-     * - Скорость подхода
-     * - Объемная активность
-     * - Предыдущие реакции на уровень
-     */
-    double CalculateBounceProb(double price, double fibo_level, double approach_angle, bool volume_confirmation) {
-        return 0.5; // Нейтральная вероятность
-    }
-    
-    /**
-     * @brief Определение потенциала пробоя уровня Фибоначчи
-     * @param price Текущая цена
-     * @param fibo_level Уровень Фибоначчи
-     * @param momentum Моментум движения
-     * @param volume_confirmation Подтверждение объемами
-     * @return Вероятность пробоя от 0.0 до 1.0
-     */
-    double CalculateBreakoutProb(double price, double fibo_level, double momentum, bool volume_confirmation) {
-        return 0.5; // Нейтральная вероятность
-    }
-    
-    /**
-     * @brief Генерация торгового сигнала на основе анализа Фибоначчи
-     * @param current_price Текущая цена
-     * @param swing_high Максимум свинга
-     * @param swing_low Минимум свинга
-     * @param signal_strength Сила сигнала (выходной параметр)
-     * @param target_price Целевая цена (выходной параметр)
-     * @param stop_price Стоп цена (выходной параметр)
-     * @return Направление сигнала (1 - BUY, -1 - SELL, 0 - нет сигнала)
-     */
-    int GenerateFiboSignal(double current_price, double swing_high, double swing_low,
-                          double &signal_strength, double &target_price, double &stop_price) {
-        signal_strength = 0.0;
-        target_price = current_price;
-        stop_price = current_price;
-        return 0; // Нет сигнала
-    }
-    
-    // --- ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ---
-    
-    /**
-     * @brief Получение стандартного уровня Фибоначчи по индексу
-     * @param index Индекс уровня (0-6)
-     * @return Значение уровня в процентах
-     */
-    double GetStandardLevel(int index) const {
-        if(index < 0 || index >= ArraySize(m_standard_levels)) return 0.0;
-        return m_standard_levels[index];
-    }
-    
-    /**
-     * @brief Получение количества стандартных уровней
-     * @return Количество стандартных уровней Фибоначчи
-     */
-    int GetStandardLevelsCount() const {
-        return ArraySize(m_standard_levels);
-    }
-    
-    /**
-     * @brief Проверка является ли уровень значимым уровнем Фибоначчи
-     * @param level Уровень в процентах
-     * @param tolerance Допустимое отклонение
-     * @return true если уровень близок к стандартному уровню Фибо
-     */
-    bool IsSignificantFiboLevel(double level, double tolerance = 1.0) const {
-        for(int i = 0; i < ArraySize(m_standard_levels); i++) {
-            if(MathAbs(level - m_standard_levels[i]) <= tolerance) {
+    bool IsInFiboCluster(const string symbol, ENUM_TIMEFRAMES timeframe, double price) {
+        FiboGrid fibo_grid;
+        if(!BuildFiboGrid(symbol, timeframe, fibo_grid)) {
+            return false;
+        }
+        
+        double tolerance = m_confluence_tolerance * _Point;
+        
+        for(int i = 0; i < fibo_grid.level_count; i++) {
+            if(MathAbs(price - fibo_grid.levels[i].price) <= tolerance) {
                 return true;
             }
         }
-        return false;
-    }
-    
-    /**
-     * @brief Расчет цены для заданного уровня коррекции
-     * @param swing_high Максимум свинга
-     * @param swing_low Минимум свинга
-     * @param retracement_percent Процент коррекции
-     * @return Цена на уровне коррекции
-     */
-    double CalculateLevelPrice(double swing_high, double swing_low, double retracement_percent) const {
-        double range = swing_high - swing_low;
-        return swing_high - (range * retracement_percent / 100.0);
-    }
-    
-    /**
-     * @brief Расчет процента коррекции для заданной цены
-     * @param swing_high Максимум свинга
-     * @param swing_low Минимум свинга
-     * @param price Цена для анализа
-     * @return Процент коррекции
-     */
-    double CalculateRetracementPercent(double swing_high, double swing_low, double price) const {
-        double range = swing_high - swing_low;
-        if(range == 0.0) return 0.0;
-        
-        return ((swing_high - price) / range) * 100.0;
-    }
-    
-private:
-    // --- ПРИВАТНЫЕ ПЕРЕМЕННЫЕ ---
-    double m_standard_levels[7]; // Стандартные уровни Фибоначчи
-    
-    // --- ПРИВАТНЫЕ МЕТОДЫ ---
-    
-    /**
-     * @brief Инициализация стандартных уровней Фибоначчи
-     */
-    void InitializeStandardLevels() {
-        // Стандартные уровни коррекции Фибоначчи в процентах
-        m_standard_levels[0] = 0.0;    // 0%
-        m_standard_levels[1] = 23.6;   // 23.6%
-        m_standard_levels[2] = 38.2;   // 38.2%
-        m_standard_levels[3] = 50.0;   // 50.0%
-        m_standard_levels[4] = 61.8;   // 61.8% (золотое сечение)
-        m_standard_levels[5] = 78.6;   // 78.6%
-        m_standard_levels[6] = 100.0;  // 100%
-    }
-    
-    /**
-     * @brief Поиск значимых свингов на графике
-     * @param highs Массив максимумов
-     * @param lows Массив минимумов
-     * @param lookback Период поиска
-     * @param swing_high Найденный максимум свинга (выходной параметр)
-     * @param swing_low Найденный минимум свинга (выходной параметр)
-     * @return true если найдены значимые свинги
-     */
-    bool FindSignificantSwings(const double &highs[], const double &lows[], int lookback,
-                              double &swing_high, double &swing_low) {
-        // TODO: Реализовать алгоритм поиска значимых свингов:
-        // - Поиск локальных экстремумов
-        // - Фильтрация по минимальному размеру движения
-        // - Учет временного интервала между свингами
-        
-        swing_high = 0.0;
-        swing_low = 0.0;
-        return false;
-    }
-    
-    /**
-     * @brief Проверка confluence с другими техническими уровнями
-     * @param price Анализируемая цена
-     * @param support_levels Уровни поддержки
-     * @param resistance_levels Уровни сопротивления
-     * @param tolerance Допустимое отклонение
-     * @return true если есть confluence
-     */
-    bool CheckConfluence(double price, const double &support_levels[], const double &resistance_levels[], double tolerance) {
-        // TODO: Реализовать проверку схождения с:
-        // - Уровнями поддержки/сопротивления
-        // - Скользящими средними
-        // - Пивот поинтами
-        // - Психологическими уровнями
         
         return false;
     }
     
-    /**
-     * @brief Анализ исторической реакции на уровень
-     * @param level_price Цена уровня
-     * @param historical_data Исторические данные
-     * @param reactions Массив реакций (выходной параметр)
-     * @return Количество найденных реакций
-     */
-    int AnalyzeHistoricalReactions(double level_price, const MqlRates &historical_data[], double &reactions[]) {
-        // TODO: Реализовать анализ исторических реакций:
-        // - Поиск касаний уровня в истории
-        // - Анализ силы отскоков/пробоев
-        // - Классификация типов реакций
+    void DrawFiboGrid(const FiboGrid &fibo_grid, long chart_id, const string symbol) const {
+        if(!fibo_grid.is_valid) return;
         
-        ArrayResize(reactions, 0);
-        return 0;
+        string grid_name = StringFormat("FiboGrid_%s_%d", symbol, (int)TimeCurrent());
+        
+        for(int i = 0; i < fibo_grid.level_count; i++) {
+            string level_name = StringFormat("%s_Level_%d", grid_name, i);
+            ObjectDelete(chart_id, level_name);
+            
+            if(ObjectCreate(chart_id, level_name, OBJ_HLINE, 0, 0, fibo_grid.levels[i].price)) {
+                ObjectSetInteger(chart_id, level_name, OBJPROP_COLOR, fibo_grid.levels[i].level_color);
+                ObjectSetInteger(chart_id, level_name, OBJPROP_STYLE, fibo_grid.levels[i].line_style);
+                ObjectSetInteger(chart_id, level_name, OBJPROP_WIDTH, 
+                               fibo_grid.levels[i].is_strong ? 2 : fibo_grid.levels[i].line_width);
+                ObjectSetString(chart_id, level_name, OBJPROP_TEXT, fibo_grid.levels[i].level_name);
+                
+                if(fibo_grid.levels[i].is_strong) {
+                    ObjectSetInteger(chart_id, level_name, OBJPROP_COLOR, clrYellow);
+                    ObjectSetInteger(chart_id, level_name, OBJPROP_WIDTH, 3);
+                }
+            }
+        }
+        
+        string high_line = StringFormat("%s_High", grid_name);
+        string low_line = StringFormat("%s_Low", grid_name);
+        
+        ObjectDelete(chart_id, high_line);
+        ObjectDelete(chart_id, low_line);
+        
+        if(ObjectCreate(chart_id, high_line, OBJ_VLINE, 0, fibo_grid.high_time, 0)) {
+            ObjectSetInteger(chart_id, high_line, OBJPROP_COLOR, clrRed);
+            ObjectSetInteger(chart_id, high_line, OBJPROP_STYLE, STYLE_SOLID);
+            ObjectSetInteger(chart_id, high_line, OBJPROP_WIDTH, 2);
+        }
+        
+        if(ObjectCreate(chart_id, low_line, OBJ_VLINE, 0, fibo_grid.low_time, 0)) {
+            ObjectSetInteger(chart_id, low_line, OBJPROP_COLOR, clrBlue);
+            ObjectSetInteger(chart_id, low_line, OBJPROP_STYLE, STYLE_SOLID);
+            ObjectSetInteger(chart_id, low_line, OBJPROP_WIDTH, 2);
+        }
+    }
+    
+    void DrawFiboWithConfluence(const FiboGrid &fibo_grid, long chart_id, const string symbol) const {
+        if(!fibo_grid.is_valid) return;
+        
+        DrawFiboGrid(fibo_grid, chart_id, symbol);
+        
+        double tolerance = m_confluence_tolerance * _Point;
+        
+        for(int i = 0; i < fibo_grid.level_count; i++) {
+            if(fibo_grid.levels[i].confluence_count > 0) {
+                string confluence_name = StringFormat("FiboConfluence_%s_%d_%d", symbol, i, (int)TimeCurrent());
+                ObjectDelete(chart_id, confluence_name);
+                
+                double zone_high = fibo_grid.levels[i].price + tolerance;
+                double zone_low = fibo_grid.levels[i].price - tolerance;
+                
+                if(ObjectCreate(chart_id, confluence_name, OBJ_RECTANGLE, 0, 
+                               TimeCurrent() - 3600, zone_high, TimeCurrent() + 3600, zone_low)) {
+                    ObjectSetInteger(chart_id, confluence_name, OBJPROP_COLOR, C'255,255,0,50');
+                    ObjectSetInteger(chart_id, confluence_name, OBJPROP_FILL, true);
+                    ObjectSetInteger(chart_id, confluence_name, OBJPROP_BACK, true);
+                    ObjectSetInteger(chart_id, confluence_name, OBJPROP_STYLE, STYLE_SOLID);
+                    ObjectSetInteger(chart_id, confluence_name, OBJPROP_WIDTH, 1);
+                }
+            }
+        }
+    }
+    
+    void ClearFiboVisualization(long chart_id) const {
+        int total_objects = ObjectsTotal(chart_id);
+        for(int i = total_objects - 1; i >= 0; i--) {
+            string obj_name = ObjectName(chart_id, i);
+            if(StringFind(obj_name, "Fibo") == 0) {
+                ObjectDelete(chart_id, obj_name);
+            }
+        }
     }
 };
