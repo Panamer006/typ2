@@ -4,6 +4,43 @@
 #property copyright "TYP2"
 
 /**
+ * @brief Структура для описания обнаруженной фигуры
+ */
+struct FigureInfo {
+    bool    is_valid;           // Валидность фигуры
+    string  figure_name;        // Название фигуры
+    string  figure_type;        // Тип: "Reversal" или "Continuation"
+    bool    is_formed;          // Сформирована ли фигура
+    bool    is_broken;          // Пробита ли фигура
+    double  breakout_price;     // Цена пробоя
+    double  target_price;       // Целевая цена
+    double  stop_price;         // Стоп цена
+    int     direction;          // Направление ожидаемого движения (1=UP, -1=DOWN)
+    double  reliability;        // Надежность фигуры (0.0-1.0)
+    
+    // Ключевые точки фигуры
+    datetime key_times[10];     // Временные координаты ключевых точек
+    double   key_prices[10];    // Ценовые координаты ключевых точек
+    int      key_points_count;  // Количество ключевых точек
+    
+    FigureInfo() {
+        is_valid = false;
+        figure_name = "";
+        figure_type = "";
+        is_formed = false;
+        is_broken = false;
+        breakout_price = 0.0;
+        target_price = 0.0;
+        stop_price = 0.0;
+        direction = 0;
+        reliability = 0.0;
+        key_points_count = 0;
+        ArrayInitialize(key_times, 0);
+        ArrayInitialize(key_prices, 0.0);
+    }
+};
+
+/**
  * @brief Модуль детекции графических фигур
  * 
  * Предоставляет функциональность для автоматического распознавания
@@ -28,17 +65,98 @@ public:
      * @param highs Массив максимумов
      * @param lows Массив минимумов
      * @param lookback Период поиска
+     * @param figure_info Структура с подробной информацией о фигуре
      * @return true если обнаружена фигура "Голова и Плечи"
-     * 
-     * TODO: Реализовать полную логику детекции:
-     * - Поиск трех последовательных вершин
-     * - Центральная вершина (голова) выше боковых (плечи)
-     * - Примерно равные высоты плеч
-     * - Линия шеи соединяет минимумы между плечами
-     * - Пробой линии шеи как сигнал к продаже
      */
-    bool DetectHeadAndShoulders(const double &highs[], const double &lows[], int lookback = 50) {
-        // Заглушка - всегда возвращает false
+    bool DetectHeadAndShoulders(const double &highs[], const double &lows[], int lookback, FigureInfo &figure_info) {
+        if(ArraySize(highs) < lookback || ArraySize(lows) < lookback) return false;
+        
+        figure_info = FigureInfo(); // Сброс структуры
+        
+        // Ищем локальные максимумы для плеч и головы
+        double peaks[50];
+        int peak_indices[50];
+        int peaks_found = FindLocalMaxima(highs, lookback, peaks, peak_indices);
+        
+        if(peaks_found < 3) return false;
+        
+        // Ищем паттерн: левое плечо - голова - правое плечо
+        for(int i = 0; i < peaks_found - 2; i++) {
+            double left_shoulder = peaks[i];
+            double head = peaks[i + 1];
+            double right_shoulder = peaks[i + 2];
+            
+            int left_idx = peak_indices[i];
+            int head_idx = peak_indices[i + 1];
+            int right_idx = peak_indices[i + 2];
+            
+            // 1. Голова должна быть выше плеч
+            if(head <= left_shoulder || head <= right_shoulder) continue;
+            
+            // 2. Плечи должны быть примерно на одном уровне (допуск 5%)
+            double shoulder_diff = MathAbs(left_shoulder - right_shoulder);
+            double avg_shoulder = (left_shoulder + right_shoulder) / 2;
+            if(shoulder_diff > avg_shoulder * 0.05) continue;
+            
+            // 3. Находим минимумы между плечами (линия шеи)
+            double left_valley = DBL_MAX;
+            double right_valley = DBL_MAX;
+            int left_valley_idx = -1;
+            int right_valley_idx = -1;
+            
+            // Левая впадина (между левым плечом и головой)
+            for(int j = left_idx; j < head_idx; j++) {
+                if(lows[j] < left_valley) {
+                    left_valley = lows[j];
+                    left_valley_idx = j;
+                }
+            }
+            
+            // Правая впадина (между головой и правым плечом)
+            for(int j = head_idx; j < right_idx; j++) {
+                if(lows[j] < right_valley) {
+                    right_valley = lows[j];
+                    right_valley_idx = j;
+                }
+            }
+            
+            if(left_valley_idx == -1 || right_valley_idx == -1) continue;
+            
+            // 4. Линия шеи должна быть примерно горизонтальной
+            double neckline_slope = MathAbs(right_valley - left_valley);
+            double head_height = head - MathMax(left_valley, right_valley);
+            if(neckline_slope > head_height * 0.2) continue; // Наклон не более 20% от высоты
+            
+            // 5. Расчет целей и надежности
+            double neckline_level = (left_valley + right_valley) / 2;
+            double pattern_height = head - neckline_level;
+            
+            // Заполняем структуру фигуры
+            figure_info.is_valid = true;
+            figure_info.figure_name = "Head and Shoulders";
+            figure_info.figure_type = "Reversal";
+            figure_info.is_formed = true;
+            figure_info.direction = -1; // Медвежья фигура
+            figure_info.breakout_price = neckline_level;
+            figure_info.target_price = neckline_level - pattern_height;
+            figure_info.stop_price = head;
+            
+            // Ключевые точки
+            figure_info.key_points_count = 5;
+            figure_info.key_prices[0] = left_shoulder;  // Левое плечо
+            figure_info.key_prices[1] = left_valley;    // Левая впадина
+            figure_info.key_prices[2] = head;           // Голова
+            figure_info.key_prices[3] = right_valley;   // Правая впадина
+            figure_info.key_prices[4] = right_shoulder; // Правое плечо
+            
+            // Надежность на основе симметрии
+            double symmetry = 1.0 - (shoulder_diff / avg_shoulder);
+            double height_ratio = pattern_height / head;
+            figure_info.reliability = (symmetry + height_ratio) / 2;
+            
+            return true;
+        }
+        
         return false;
     }
     
@@ -61,36 +179,131 @@ public:
     }
     
     /**
-     * @brief Детекция фигуры "Двойная Вершина"
+     * @brief Детекция фигуры "Двойная Вершина/Дно"
      * @param highs Массив максимумов
      * @param lows Массив минимумов
      * @param lookback Период поиска
-     * @return true если обнаружена "Двойная Вершина"
-     * 
-     * TODO: Реализовать логику детекции Double Top:
-     * - Два максимума на примерно одинаковом уровне
-     * - Расстояние между максимумами 10-50 баров
-     * - Минимум между вершинами ниже на 3-5%
-     * - Пробой уровня минимума как сигнал к продаже
+     * @param figure_info Структура с подробной информацией о фигуре
+     * @param search_tops true для поиска двойной вершины, false для двойного дна
+     * @return true если обнаружена фигура
      */
-    bool DetectDoubleTop(const double &highs[], const double &lows[], int lookback = 50) {
-        return false;
-    }
-    
-    /**
-     * @brief Детекция фигуры "Двойное Дно"
-     * @param highs Массив максимумов
-     * @param lows Массив минимумов
-     * @param lookback Период поиска
-     * @return true если обнаружено "Двойное Дно"
-     * 
-     * TODO: Реализовать логику детекции Double Bottom:
-     * - Два минимума на примерно одинаковом уровне
-     * - Расстояние между минимумами 10-50 баров
-     * - Максимум между впадинами выше на 3-5%
-     * - Пробой уровня максимума как сигнал к покупке
-     */
-    bool DetectDoubleBottom(const double &highs[], const double &lows[], int lookback = 50) {
+    bool DetectDoubleTopBottom(const double &highs[], const double &lows[], int lookback, FigureInfo &figure_info, bool search_tops = true) {
+        if(ArraySize(highs) < lookback || ArraySize(lows) < lookback) return false;
+        
+        figure_info = FigureInfo();
+        
+        if(search_tops) {
+            // Поиск двойной вершины
+            double peaks[20];
+            int peak_indices[20];
+            int peaks_found = FindLocalMaxima(highs, lookback, peaks, peak_indices);
+            
+            if(peaks_found < 2) return false;
+            
+            for(int i = 0; i < peaks_found - 1; i++) {
+                double first_peak = peaks[i];
+                double second_peak = peaks[i + 1];
+                int first_idx = peak_indices[i];
+                int second_idx = peak_indices[i + 1];
+                
+                // Расстояние между пиками должно быть 10-50 баров
+                int distance = second_idx - first_idx;
+                if(distance < 10 || distance > 50) continue;
+                
+                // Пики должны быть на одинаковом уровне (допуск 2%)
+                double price_diff = MathAbs(first_peak - second_peak);
+                double avg_price = (first_peak + second_peak) / 2;
+                if(price_diff > avg_price * 0.02) continue;
+                
+                // Находим минимум между пиками
+                double valley = DBL_MAX;
+                int valley_idx = -1;
+                for(int j = first_idx; j < second_idx; j++) {
+                    if(lows[j] < valley) {
+                        valley = lows[j];
+                        valley_idx = j;
+                    }
+                }
+                
+                // Минимум должен быть ниже пиков на 3-5%
+                double retracement = (avg_price - valley) / avg_price;
+                if(retracement < 0.03 || retracement > 0.15) continue;
+                
+                // Заполняем информацию о фигуре
+                figure_info.is_valid = true;
+                figure_info.figure_name = "Double Top";
+                figure_info.figure_type = "Reversal";
+                figure_info.is_formed = true;
+                figure_info.direction = -1;
+                figure_info.breakout_price = valley;
+                figure_info.target_price = valley - (avg_price - valley);
+                figure_info.stop_price = avg_price;
+                figure_info.reliability = 1.0 - (price_diff / avg_price) - MathAbs(retracement - 0.05) * 2;
+                
+                figure_info.key_points_count = 3;
+                figure_info.key_prices[0] = first_peak;
+                figure_info.key_prices[1] = valley;
+                figure_info.key_prices[2] = second_peak;
+                
+                return true;
+            }
+        } else {
+            // Поиск двойного дна
+            double valleys[20];
+            int valley_indices[20];
+            int valleys_found = FindLocalMinima(lows, lookback, valleys, valley_indices);
+            
+            if(valleys_found < 2) return false;
+            
+            for(int i = 0; i < valleys_found - 1; i++) {
+                double first_valley = valleys[i];
+                double second_valley = valleys[i + 1];
+                int first_idx = valley_indices[i];
+                int second_idx = valley_indices[i + 1];
+                
+                // Расстояние между впадинами должно быть 10-50 баров
+                int distance = second_idx - first_idx;
+                if(distance < 10 || distance > 50) continue;
+                
+                // Впадины должны быть на одинаковом уровне (допуск 2%)
+                double price_diff = MathAbs(first_valley - second_valley);
+                double avg_price = (first_valley + second_valley) / 2;
+                if(price_diff > avg_price * 0.02) continue;
+                
+                // Находим максимум между впадинами
+                double peak = 0;
+                int peak_idx = -1;
+                for(int j = first_idx; j < second_idx; j++) {
+                    if(highs[j] > peak) {
+                        peak = highs[j];
+                        peak_idx = j;
+                    }
+                }
+                
+                // Максимум должен быть выше впадин на 3-5%
+                double retracement = (peak - avg_price) / avg_price;
+                if(retracement < 0.03 || retracement > 0.15) continue;
+                
+                // Заполняем информацию о фигуре
+                figure_info.is_valid = true;
+                figure_info.figure_name = "Double Bottom";
+                figure_info.figure_type = "Reversal";
+                figure_info.is_formed = true;
+                figure_info.direction = 1;
+                figure_info.breakout_price = peak;
+                figure_info.target_price = peak + (peak - avg_price);
+                figure_info.stop_price = avg_price;
+                figure_info.reliability = 1.0 - (price_diff / avg_price) - MathAbs(retracement - 0.05) * 2;
+                
+                figure_info.key_points_count = 3;
+                figure_info.key_prices[0] = first_valley;
+                figure_info.key_prices[1] = peak;
+                figure_info.key_prices[2] = second_valley;
+                
+                return true;
+            }
+        }
+        
         return false;
     }
     
@@ -226,39 +439,178 @@ public:
         return false;
     }
     
-    // --- КЛИНОВИДНЫЕ ФИГУРЫ ---
+    // --- КРИТИЧЕСКИ ВАЖНЫЕ ФИГУРЫ (КЛИН, ФЛАГ, ТРЕУГОЛЬНИК, ПРЯМОУГОЛЬНИК) ---
     
     /**
-     * @brief Детекция "Восходящего Клина"
+     * @brief Детекция фигуры "Клин" (Wedge)
      * @param highs Массив максимумов
      * @param lows Массив минимумов
      * @param lookback Период поиска
-     * @return true если обнаружен восходящий клин
-     * 
-     * TODO: Реализовать логику детекции Rising Wedge:
-     * - Восходящие линии поддержки и сопротивления
-     * - Линии сходятся вверх
-     * - Уменьшающиеся объемы
-     * - Медвежий сигнал при пробое поддержки
+     * @param figure_info Структура с информацией о фигуре
+     * @return true если обнаружен клин
      */
-    bool DetectRisingWedge(const double &highs[], const double &lows[], int lookback = 50) {
+    bool DetectWedge(const double &highs[], const double &lows[], int lookback, FigureInfo &figure_info) {
+        if(ArraySize(highs) < lookback) return false;
+        
+        figure_info = FigureInfo();
+        
+        // Найдем линии тренда для максимумов и минимумов
+        double upper_slope, lower_slope;
+        double upper_start, lower_start;
+        
+        if(!CalculateTrendLine(highs, lookback/2, upper_slope, upper_start) ||
+           !CalculateTrendLine(lows, lookback/2, lower_slope, lower_start)) return false;
+        
+        // Проверяем схождение линий (клин)
+        bool is_wedge = false;
+        bool is_rising = false;
+        
+        if(upper_slope < 0 && lower_slope < 0 && lower_slope < upper_slope) {
+            // Нисходящий клин (бычий)
+            is_wedge = true;
+            is_rising = false;
+        } else if(upper_slope > 0 && lower_slope > 0 && upper_slope < lower_slope) {
+            // Восходящий клин (медвежий)
+            is_wedge = true;
+            is_rising = true;
+        }
+        
+        if(is_wedge) {
+            figure_info.is_valid = true;
+            figure_info.figure_name = is_rising ? "Rising Wedge" : "Falling Wedge";
+            figure_info.figure_type = "Reversal";
+            figure_info.direction = is_rising ? -1 : 1;
+            figure_info.reliability = 0.7;
+            return true;
+        }
+        
         return false;
     }
     
     /**
-     * @brief Детекция "Нисходящего Клина"
+     * @brief Детекция фигуры "Флаг" (Flag)
      * @param highs Массив максимумов
      * @param lows Массив минимумов
      * @param lookback Период поиска
-     * @return true если обнаружен нисходящий клин
-     * 
-     * TODO: Реализовать логику детекции Falling Wedge:
-     * - Нисходящие линии поддержки и сопротивления
-     * - Линии сходятся вниз
-     * - Уменьшающиеся объемы
-     * - Бычий сигнал при пробое сопротивления
+     * @param figure_info Структура с информацией о фигуре
+     * @return true если обнаружен флаг
      */
-    bool DetectFallingWedge(const double &highs[], const double &lows[], int lookback = 50) {
+    bool DetectFlag(const double &highs[], const double &lows[], int lookback, FigureInfo &figure_info) {
+        if(ArraySize(highs) < lookback) return false;
+        
+        figure_info = FigureInfo();
+        
+        // Ищем сильное движение (флагшток) + консолидацию
+        double range_start = highs[lookback-10];
+        double range_end = highs[5];
+        double movement = MathAbs(range_end - range_start);
+        
+        // Проверяем консолидацию в последних 10 барах
+        double consolidation_range = 0;
+        for(int i = 0; i < 10; i++) {
+            consolidation_range += highs[i] - lows[i];
+        }
+        consolidation_range /= 10;
+        
+        if(movement > consolidation_range * 5) {
+            figure_info.is_valid = true;
+            figure_info.figure_name = "Flag";
+            figure_info.figure_type = "Continuation";
+            figure_info.direction = (range_end > range_start) ? 1 : -1;
+            figure_info.reliability = 0.75;
+            return true;
+        }
+        
+        return false;
+    }
+    
+    /**
+     * @brief Детекция фигуры "Треугольник" (Triangle)
+     * @param highs Массив максимумов
+     * @param lows Массив минимумов
+     * @param lookback Период поиска
+     * @param figure_info Структура с информацией о фигуре
+     * @return true если обнаружен треугольник
+     */
+    bool DetectTriangle(const double &highs[], const double &lows[], int lookback, FigureInfo &figure_info) {
+        if(ArraySize(highs) < lookback) return false;
+        
+        figure_info = FigureInfo();
+        
+        // Рассчитываем линии тренда
+        double upper_slope, lower_slope;
+        double upper_start, lower_start;
+        
+        if(!CalculateTrendLine(highs, lookback, upper_slope, upper_start) ||
+           !CalculateTrendLine(lows, lookback, lower_slope, lower_start)) return false;
+        
+        // Определяем тип треугольника
+        string triangle_type = "";
+        if(upper_slope < -0.0001 && lower_slope > 0.0001) {
+            triangle_type = "Symmetrical Triangle";
+        } else if(MathAbs(upper_slope) < 0.0001 && lower_slope > 0.0001) {
+            triangle_type = "Ascending Triangle";
+        } else if(upper_slope < -0.0001 && MathAbs(lower_slope) < 0.0001) {
+            triangle_type = "Descending Triangle";
+        }
+        
+        if(triangle_type != "") {
+            figure_info.is_valid = true;
+            figure_info.figure_name = triangle_type;
+            figure_info.figure_type = "Continuation";
+            figure_info.reliability = 0.65;
+            return true;
+        }
+        
+        return false;
+    }
+    
+    /**
+     * @brief Детекция фигуры "Прямоугольник" (Rectangle)
+     * @param highs Массив максимумов
+     * @param lows Массив минимумов
+     * @param lookback Период поиска
+     * @param figure_info Структура с информацией о фигуре
+     * @return true если обнаружен прямоугольник
+     */
+    bool DetectRectangle(const double &highs[], const double &lows[], int lookback, FigureInfo &figure_info) {
+        if(ArraySize(highs) < lookback) return false;
+        
+        figure_info = FigureInfo();
+        
+        // Найдем уровни поддержки и сопротивления
+        double resistance_level = 0;
+        double support_level = DBL_MAX;
+        
+        for(int i = 0; i < lookback; i++) {
+            if(highs[i] > resistance_level) resistance_level = highs[i];
+            if(lows[i] < support_level) support_level = lows[i];
+        }
+        
+        // Проверяем, что цена касается уровней минимум 2 раза каждого
+        int resistance_touches = 0;
+        int support_touches = 0;
+        double tolerance = (resistance_level - support_level) * 0.02;
+        
+        for(int i = 0; i < lookback; i++) {
+            if(MathAbs(highs[i] - resistance_level) <= tolerance) resistance_touches++;
+            if(MathAbs(lows[i] - support_level) <= tolerance) support_touches++;
+        }
+        
+        if(resistance_touches >= 2 && support_touches >= 2) {
+            double range_size = resistance_level - support_level;
+            if(range_size > 0) {
+                figure_info.is_valid = true;
+                figure_info.figure_name = "Rectangle";
+                figure_info.figure_type = "Continuation";
+                figure_info.breakout_price = resistance_level;
+                figure_info.target_price = resistance_level + range_size;
+                figure_info.stop_price = support_level;
+                figure_info.reliability = 0.6;
+                return true;
+            }
+        }
+        
         return false;
     }
     
@@ -334,24 +686,137 @@ private:
      * @brief Поиск локальных максимумов
      * @param prices Массив цен
      * @param window Окно поиска
-     * @param peaks Массив найденных пиков (выходной параметр)
+     * @param peaks Массив найденных пиков
+     * @param peak_indices Массив индексов пиков
      * @return Количество найденных пиков
      */
-    int FindLocalMaxima(const double &prices[], int window, double &peaks[]) {
-        // TODO: Реализовать алгоритм поиска локальных максимумов
-        return 0;
+    int FindLocalMaxima(const double &prices[], int window, double &peaks[], int &peak_indices[]) {
+        int peaks_count = 0;
+        int lookback_window = 3; // Окно для поиска локальных максимумов
+        
+        for(int i = lookback_window; i < window - lookback_window && peaks_count < 50; i++) {
+            bool is_peak = true;
+            
+            // Проверяем, что текущая точка выше всех соседних
+            for(int j = i - lookback_window; j <= i + lookback_window; j++) {
+                if(j != i && prices[j] >= prices[i]) {
+                    is_peak = false;
+                    break;
+                }
+            }
+            
+            if(is_peak) {
+                peaks[peaks_count] = prices[i];
+                peak_indices[peaks_count] = i;
+                peaks_count++;
+            }
+        }
+        
+        return peaks_count;
     }
     
     /**
      * @brief Поиск локальных минимумов
      * @param prices Массив цен
      * @param window Окно поиска
-     * @param valleys Массив найденных впадин (выходной параметр)
+     * @param valleys Массив найденных впадин
+     * @param valley_indices Массив индексов впадин
      * @return Количество найденных впадин
      */
-    int FindLocalMinima(const double &prices[], int window, double &valleys[]) {
-        // TODO: Реализовать алгоритм поиска локальных минимумов
-        return 0;
+    int FindLocalMinima(const double &prices[], int window, double &valleys[], int &valley_indices[]) {
+        int valleys_count = 0;
+        int lookback_window = 3;
+        
+        for(int i = lookback_window; i < window - lookback_window && valleys_count < 50; i++) {
+            bool is_valley = true;
+            
+            // Проверяем, что текущая точка ниже всех соседних
+            for(int j = i - lookback_window; j <= i + lookback_window; j++) {
+                if(j != i && prices[j] <= prices[i]) {
+                    is_valley = false;
+                    break;
+                }
+            }
+            
+            if(is_valley) {
+                valleys[valleys_count] = prices[i];
+                valley_indices[valleys_count] = i;
+                valleys_count++;
+            }
+        }
+        
+        return valleys_count;
+    }
+    
+    /**
+     * @brief Расчет линии тренда методом наименьших квадратов
+     * @param prices Массив цен
+     * @param window Период расчета
+     * @param slope Угол наклона (выходной параметр)
+     * @param intercept Y-перехват (выходной параметр)
+     * @return true если расчет успешен
+     */
+    bool CalculateTrendLine(const double &prices[], int window, double &slope, double &intercept) {
+        if(window < 2) return false;
+        
+        double sum_x = 0, sum_y = 0, sum_xy = 0, sum_x2 = 0;
+        
+        for(int i = 0; i < window; i++) {
+            sum_x += i;
+            sum_y += prices[i];
+            sum_xy += i * prices[i];
+            sum_x2 += i * i;
+        }
+        
+        double n = window;
+        double denominator = n * sum_x2 - sum_x * sum_x;
+        
+        if(MathAbs(denominator) < 1e-10) return false;
+        
+        slope = (n * sum_xy - sum_x * sum_y) / denominator;
+        intercept = (sum_y - slope * sum_x) / n;
+        
+        return true;
+    }
+    
+    /**
+     * @brief Визуальный слой - отрисовка фигур на графике
+     * @param figure_info Информация о фигуре
+     * @param chart_id ID графика
+     */
+    void DrawFigure(const FigureInfo &figure_info, long chart_id = 0) const {
+        if(!figure_info.is_valid) return;
+        
+        string figure_prefix = StringFormat("Figure_%s_%d", figure_info.figure_name, GetTickCount());
+        
+        // Отрисовываем ключевые точки
+        for(int i = 0; i < figure_info.key_points_count; i++) {
+            string point_name = figure_prefix + "_point_" + IntegerToString(i);
+            ObjectDelete(chart_id, point_name);
+            
+            if(ObjectCreate(chart_id, point_name, OBJ_ARROW, 0, figure_info.key_times[i], figure_info.key_prices[i])) {
+                ObjectSetInteger(chart_id, point_name, OBJPROP_ARROWCODE, 159);
+                ObjectSetInteger(chart_id, point_name, OBJPROP_COLOR, clrBlue);
+                ObjectSetInteger(chart_id, point_name, OBJPROP_WIDTH, 2);
+            }
+        }
+        
+        // Добавляем текстовую метку
+        string label_name = figure_prefix + "_label";
+        ObjectDelete(chart_id, label_name);
+        
+        if(figure_info.key_points_count > 0) {
+            datetime label_time = figure_info.key_times[0];
+            double label_price = figure_info.key_prices[0];
+            
+            if(ObjectCreate(chart_id, label_name, OBJ_TEXT, 0, label_time, label_price)) {
+                string direction_text = (figure_info.direction > 0) ? "BULLISH" : (figure_info.direction < 0) ? "BEARISH" : "NEUTRAL";
+                string label_text = StringFormat("%s %s (%.1f%%)", figure_info.figure_name, direction_text, figure_info.reliability * 100);
+                ObjectSetString(chart_id, label_name, OBJPROP_TEXT, label_text);
+                ObjectSetInteger(chart_id, label_name, OBJPROP_COLOR, (figure_info.figure_type == "Reversal") ? clrOrange : clrCyan);
+                ObjectSetInteger(chart_id, label_name, OBJPROP_FONTSIZE, 9);
+            }
+        }
     }
     
     /**
