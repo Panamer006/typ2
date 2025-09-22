@@ -12,6 +12,7 @@ CTrade trade;
 #include "Modules/typ_risk.mqh"
 #include "Modules/typ_execfilters.mqh"
 #include "Modules/typ_position_manager.mqh"
+#include "Modules/typ_strategies.mqh"  // Модуль стратегий Sprint 2
 
 // --- Глобальные переменные для движка режимов ---
 CRegimeEngine   g_RegimeEngine;
@@ -23,6 +24,12 @@ CExecGate       g_ExecGate;
 
 // --- Глобальная переменная для управления позициями ---
 CPositionManager g_PosManager;
+
+// --- Глобальные экземпляры модулей Спринта 2 ---
+CPatterns           g_Patterns;         // Модуль детекции свечных паттернов
+CFigures            g_Figures;          // Модуль детекции графических фигур
+CFibo               g_Fibo;             // Модуль анализа уровней Фибоначчи
+CStrategy_NightMR   g_Strategy_NightMR; // Стратегия "Ночной Возврат к Среднему"
 
 int OnInit()
 {
@@ -80,6 +87,16 @@ int OnInit()
     80.0    // adr_exit
   );
   Print("Position Manager: Initialized");
+  
+  // --- Инициализация модулей Спринта 2 ---
+  // Модули ТА инициализируются автоматически через конструкторы
+  Print("Technical Analysis Modules: Patterns, Figures, Fibonacci initialized");
+  
+  // Инициализация стратегии Night Mean Reversion
+  g_Strategy_NightMR.Initialize(&g_Patterns, &g_Figures, &g_Fibo, _Symbol, PERIOD_H1);
+  Print("Strategy Night MR: Initialized for ", _Symbol, " on H1 timeframe");
+  
+  // TODO: Добавить инициализацию для других стратегий когда они будут созданы
   
   return(INIT_SUCCEEDED);
 }
@@ -339,6 +356,32 @@ void OnTick(){
         Print("-> Strategy: Waiting for regime confirmation");
         break;
     }
+  }
+  
+  // === БЛОК ГЕНЕРАЦИИ СИГНАЛОВ СПРИНТ 2 ===
+  // Проверяем сигналы стратегий только в подходящих режимах
+  if (g_currentRegime == REGIME_FLAT_QUIET || g_currentRegime == REGIME_TREND_WEAKENING) {
+      // Получаем сигнал от стратегии Night Mean Reversion
+      SignalCandidate night_mr_signal = g_Strategy_NightMR.GetSignal(g_currentRegime);
+      
+      if (night_mr_signal.isValid) {
+          Print("=== SIGNAL DETECTED === Strategy: ", night_mr_signal.strategyID);
+          Print("Signal: ", night_mr_signal.signal_reason);
+          Print("Confidence: ", DoubleToString(night_mr_signal.confidence_score, 3));
+          Print("Direction: ", (night_mr_signal.direction > 0 ? "BUY" : "SELL"));
+          Print("Entry: ", DoubleToString(night_mr_signal.entry_price, _Digits));
+          Print("SL: ", DoubleToString(night_mr_signal.stop_loss, _Digits));
+          Print("TP: ", DoubleToString(night_mr_signal.take_profit, _Digits));
+          Print("R:R Ratio: ", DoubleToString(night_mr_signal.risk_reward_ratio, 2));
+          
+          // TODO: Передать сигнал в Resolver для финального утверждения
+          // TODO: Проверить через CRiskManager.GetRiskModifier()
+          // TODO: Проверить через CExecGate.IsExecutionAllowed()
+          // TODO: При успешных проверках - отправить ордер через CTrade
+          
+          // Пока что только логируем сигнал (заглушка)
+          Print("Signal processing: PENDING (implementation required)");
+      }
   }
   
   // === ДЕМОНСТРАЦИОННАЯ ТОРГОВАЯ ЛОГИКА ===
