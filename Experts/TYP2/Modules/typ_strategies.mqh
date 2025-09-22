@@ -934,3 +934,650 @@ private:
         return true;
     }
 };
+
+//+------------------------------------------------------------------+
+//| ТРЕНДОВЫЕ СТРАТЕГИИ (СПРИНТ 3)                                   |
+//+------------------------------------------------------------------+
+
+/**
+ * @brief Стратегия "Двойная MA с Якорем" для трендовых рынков
+ * 
+ * Использует пересечение двух скользящих средних как основной сигнал
+ * с дополнительным "якорем" для подтверждения тренда.
+ */
+class CStrategy_DualMA_Anchor {
+private:
+    // --- Указатели на модули ---
+    CPatterns*              m_patterns;
+    CFigures*               m_figures;
+    
+    // --- Параметры стратегии ---
+    string                  m_strategy_id;
+    string                  m_symbol;
+    ENUM_TIMEFRAMES         m_timeframe;
+    
+    // --- Параметры MA ---
+    int                     m_fast_ma_period;      // Период быстрой MA
+    int                     m_slow_ma_period;      // Период медленной MA
+    ENUM_MA_METHOD          m_ma_method;           // Метод расчета MA
+    ENUM_APPLIED_PRICE      m_applied_price;       // Цена для расчета
+    
+    // --- Параметры якоря ---
+    double                  m_anchor_threshold;    // Порог для якоря (в пипсах)
+    int                     m_anchor_lookback;     // Период поиска якоря
+    
+    // --- Параметры фильтрации ---
+    double                  m_min_trend_strength;  // Минимальная сила тренда
+    double                  m_min_ma_separation;   // Минимальное разделение MA
+    
+    // --- Хэндлы индикаторов ---
+    int                     m_h_fast_ma;
+    int                     m_h_slow_ma;
+    
+public:
+    /**
+     * @brief Конструктор
+     */
+    CStrategy_DualMA_Anchor() : m_patterns(NULL),
+                                m_figures(NULL),
+                                m_strategy_id("DualMA_Anchor"),
+                                m_symbol(""),
+                                m_timeframe(PERIOD_H1),
+                                m_fast_ma_period(21),
+                                m_slow_ma_period(55),
+                                m_ma_method(MODE_EMA),
+                                m_applied_price(PRICE_CLOSE),
+                                m_anchor_threshold(20.0),
+                                m_anchor_lookback(20),
+                                m_min_trend_strength(0.6),
+                                m_min_ma_separation(5.0),
+                                m_h_fast_ma(INVALID_HANDLE),
+                                m_h_slow_ma(INVALID_HANDLE)
+    {}
+    
+    /**
+     * @brief Деструктор
+     */
+    ~CStrategy_DualMA_Anchor() {
+        if(m_h_fast_ma != INVALID_HANDLE) IndicatorRelease(m_h_fast_ma);
+        if(m_h_slow_ma != INVALID_HANDLE) IndicatorRelease(m_h_slow_ma);
+    }
+    
+    /**
+     * @brief Инициализация стратегии
+     * @param patterns_ptr Указатель на модуль паттернов
+     * @param figures_ptr Указатель на модуль фигур
+     * @param symbol Торговый символ
+     * @param timeframe Таймфрейм
+     */
+    void Initialize(CPatterns* patterns_ptr, CFigures* figures_ptr, 
+                   const string symbol, ENUM_TIMEFRAMES timeframe) {
+        m_patterns = patterns_ptr;
+        m_figures = figures_ptr;
+        m_symbol = (symbol == "") ? Symbol() : symbol;
+        m_timeframe = timeframe;
+        
+        // Создаем хэндлы индикаторов
+        m_h_fast_ma = iMA(m_symbol, m_timeframe, m_fast_ma_period, 0, m_ma_method, m_applied_price);
+        m_h_slow_ma = iMA(m_symbol, m_timeframe, m_slow_ma_period, 0, m_ma_method, m_applied_price);
+        
+        if(m_h_fast_ma == INVALID_HANDLE || m_h_slow_ma == INVALID_HANDLE) {
+            Print("DualMA Anchor Strategy: Failed to create MA handles");
+        }
+        
+        Print("DualMA Anchor Strategy: Initialized for ", m_symbol, " on ", EnumToString(m_timeframe));
+    }
+    
+    /**
+     * @brief Основной метод генерации сигналов
+     * @param current_regime Текущий режим рынка
+     * @return Структура сигнала-кандидата
+     */
+    SignalCandidate GetSignal(E_MarketRegime current_regime = REGIME_UNDEFINED) {
+        SignalCandidate candidate;
+        candidate.strategyID = m_strategy_id;
+        candidate.symbol = m_symbol;
+        candidate.timeframe = EnumToString(m_timeframe);
+        candidate.signal_time = TimeCurrent();
+        
+        // Проверяем режим рынка (предпочтительно трендовые режимы)
+        if(current_regime != REGIME_TREND_STRONG && 
+           current_regime != REGIME_TREND_WEAKENING &&
+           current_regime != REGIME_UNDEFINED) {
+            candidate.signal_reason = "Market regime not suitable for trend strategy";
+            return candidate;
+        }
+        
+        // Получаем данные MA
+        double fast_ma[3], slow_ma[3];
+        if(CopyBuffer(m_h_fast_ma, 0, 0, 3, fast_ma) < 3 ||
+           CopyBuffer(m_h_slow_ma, 0, 0, 3, slow_ma) < 3) {
+            candidate.signal_reason = "Failed to get MA data";
+            return candidate;
+        }
+        
+        // Анализируем пересечение MA
+        int ma_cross_direction = AnalyzeMACross(fast_ma, slow_ma);
+        if(ma_cross_direction == 0) {
+            candidate.signal_reason = "No MA crossover detected";
+            return candidate;
+        }
+        
+        // Проверяем силу тренда
+        double trend_strength = CalculateTrendStrength(fast_ma, slow_ma);
+        if(trend_strength < m_min_trend_strength) {
+            candidate.signal_reason = StringFormat("Trend strength too low: %.2f < %.2f", 
+                                                 trend_strength, m_min_trend_strength);
+            return candidate;
+        }
+        
+        // Проверяем разделение MA
+        double ma_separation = MathAbs(fast_ma[0] - slow_ma[0]) / _Point;
+        if(ma_separation < m_min_ma_separation) {
+            candidate.signal_reason = StringFormat("MA separation too small: %.1f < %.1f pips", 
+                                                 ma_separation, m_min_ma_separation);
+            return candidate;
+        }
+        
+        // Ищем якорь (значимый экстремум)
+        double anchor_price;
+        bool anchor_found = FindAnchor(ma_cross_direction, anchor_price);
+        if(!anchor_found) {
+            candidate.signal_reason = "No significant anchor found";
+            return candidate;
+        }
+        
+        // Рассчитываем торговые уровни
+        double entry_price = SymbolInfoDouble(m_symbol, SYMBOL_BID);
+        double stop_loss, take_profit;
+        
+        if(ma_cross_direction > 0) {
+            // Бычий сигнал
+            stop_loss = MathMin(anchor_price, slow_ma[0]) - (m_anchor_threshold * _Point);
+            take_profit = entry_price + (MathAbs(entry_price - stop_loss) * 2.0); // R:R = 1:2
+        } else {
+            // Медвежий сигнал
+            stop_loss = MathMax(anchor_price, slow_ma[0]) + (m_anchor_threshold * _Point);
+            take_profit = entry_price - (MathAbs(stop_loss - entry_price) * 2.0); // R:R = 1:2
+        }
+        
+        // Проверяем R:R соотношение
+        double risk_reward = CalculateRiskReward(entry_price, stop_loss, take_profit, ma_cross_direction);
+        if(risk_reward < 1.5) {
+            candidate.signal_reason = StringFormat("Risk/Reward ratio too low: %.2f", risk_reward);
+            return candidate;
+        }
+        
+        // Формируем валидный сигнал
+        candidate.isValid = true;
+        candidate.direction = ma_cross_direction;
+        candidate.entry_price = entry_price;
+        candidate.stop_loss = stop_loss;
+        candidate.take_profit = take_profit;
+        candidate.confidence_score = CalculateConfidenceScore(trend_strength, ma_separation, anchor_found);
+        candidate.risk_reward_ratio = risk_reward;
+        candidate.signal_reason = StringFormat("DualMA Anchor: %s trend, strength %.2f, R:R %.2f", 
+                                             (ma_cross_direction > 0) ? "Bullish" : "Bearish",
+                                             trend_strength, risk_reward);
+        
+        return candidate;
+    }
+    
+private:
+    /**
+     * @brief Анализ пересечения MA
+     * @param fast_ma Массив значений быстрой MA
+     * @param slow_ma Массив значений медленной MA
+     * @return 1 для бычьего пересечения, -1 для медвежьего, 0 если нет пересечения
+     */
+    int AnalyzeMACross(const double &fast_ma[], const double &slow_ma[]) {
+        // Проверяем бычье пересечение (быстрая MA пересекает медленную снизу вверх)
+        if(fast_ma[1] <= slow_ma[1] && fast_ma[0] > slow_ma[0]) {
+            return 1;
+        }
+        
+        // Проверяем медвежье пересечение (быстрая MA пересекает медленную сверху вниз)
+        if(fast_ma[1] >= slow_ma[1] && fast_ma[0] < slow_ma[0]) {
+            return -1;
+        }
+        
+        return 0;
+    }
+    
+    /**
+     * @brief Расчет силы тренда
+     * @param fast_ma Массив значений быстрой MA
+     * @param slow_ma Массив значений медленной MA
+     * @return Сила тренда от 0.0 до 1.0
+     */
+    double CalculateTrendStrength(const double &fast_ma[], const double &slow_ma[]) {
+        // Анализируем наклон MA
+        double fast_slope = (fast_ma[0] - fast_ma[2]) / 2.0;
+        double slow_slope = (slow_ma[0] - slow_ma[2]) / 2.0;
+        
+        // Проверяем согласованность направления
+        bool same_direction = (fast_slope > 0 && slow_slope > 0) || (fast_slope < 0 && slow_slope < 0);
+        
+        if(!same_direction) return 0.0;
+        
+        // Рассчитываем силу на основе угла наклона
+        double avg_slope = (MathAbs(fast_slope) + MathAbs(slow_slope)) / 2.0;
+        double strength = MathMin(1.0, avg_slope / (_Point * 10.0)); // Нормализуем
+        
+        return strength;
+    }
+    
+    /**
+     * @brief Поиск якоря (значимого экстремума)
+     * @param direction Направление тренда
+     * @param anchor_price Цена якоря (выходной параметр)
+     * @return true если якорь найден
+     */
+    bool FindAnchor(int direction, double &anchor_price) {
+        MqlRates rates[50];
+        if(CopyRates(m_symbol, m_timeframe, 0, m_anchor_lookback, rates) < m_anchor_lookback) {
+            return false;
+        }
+        
+        double threshold = m_anchor_threshold * _Point;
+        
+        if(direction > 0) {
+            // Ищем значимый минимум для бычьего тренда
+            for(int i = 1; i < m_anchor_lookback - 1; i++) {
+                if(rates[i].low < rates[i-1].low && rates[i].low < rates[i+1].low) {
+                    // Проверяем, насколько значим этот минимум
+                    bool is_significant = true;
+                    for(int j = MathMax(0, i-5); j <= MathMin(m_anchor_lookback-1, i+5); j++) {
+                        if(j != i && rates[j].low <= rates[i].low + threshold) {
+                            is_significant = false;
+                            break;
+                        }
+                    }
+                    
+                    if(is_significant) {
+                        anchor_price = rates[i].low;
+                        return true;
+                    }
+                }
+            }
+        } else {
+            // Ищем значимый максимум для медвежьего тренда
+            for(int i = 1; i < m_anchor_lookback - 1; i++) {
+                if(rates[i].high > rates[i-1].high && rates[i].high > rates[i+1].high) {
+                    // Проверяем, насколько значим этот максимум
+                    bool is_significant = true;
+                    for(int j = MathMax(0, i-5); j <= MathMin(m_anchor_lookback-1, i+5); j++) {
+                        if(j != i && rates[j].high >= rates[i].high - threshold) {
+                            is_significant = false;
+                            break;
+                        }
+                    }
+                    
+                    if(is_significant) {
+                        anchor_price = rates[i].high;
+                        return true;
+                    }
+                }
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * @brief Расчет confidence score
+     * @param trend_strength Сила тренда
+     * @param ma_separation Разделение MA
+     * @param anchor_found Найден ли якорь
+     * @return Confidence score от 0.0 до 1.0
+     */
+    double CalculateConfidenceScore(double trend_strength, double ma_separation, bool anchor_found) {
+        double score = 0.0;
+        
+        // Базовый score от силы тренда
+        score += trend_strength * 0.4;
+        
+        // Бонус за разделение MA
+        if(ma_separation > m_min_ma_separation * 2) {
+            score += 0.2;
+        } else if(ma_separation > m_min_ma_separation) {
+            score += 0.1;
+        }
+        
+        // Бонус за найденный якорь
+        if(anchor_found) {
+            score += 0.3;
+        }
+        
+        // Бонус за согласованность направления MA
+        score += 0.1;
+        
+        return MathMin(1.0, score);
+    }
+    
+    /**
+     * @brief Расчет Risk/Reward соотношения
+     */
+    double CalculateRiskReward(double entry, double sl, double tp, int direction) {
+        double risk = MathAbs(entry - sl);
+        double reward = MathAbs(tp - entry);
+        
+        if(risk == 0) return 0;
+        return reward / risk;
+    }
+};
+
+/**
+ * @brief Стратегия "Пробой Дончиана" для трендовых рынков
+ * 
+ * Использует пробой канала Дончиана как основной сигнал
+ * с дополнительными фильтрами для подтверждения тренда.
+ */
+class CStrategy_DonchianBreakout {
+private:
+    // --- Указатели на модули ---
+    CPatterns*              m_patterns;
+    CFigures*               m_figures;
+    
+    // --- Параметры стратегии ---
+    string                  m_strategy_id;
+    string                  m_symbol;
+    ENUM_TIMEFRAMES         m_timeframe;
+    
+    // --- Параметры канала Дончиана ---
+    int                     m_donchian_period;     // Период канала Дончиана
+    double                  m_breakout_threshold;  // Порог пробоя (в пипсах)
+    int                     m_confirmation_bars;   // Количество баров подтверждения
+    
+    // --- Параметры фильтрации ---
+    double                  m_min_channel_width;   // Минимальная ширина канала
+    double                  m_volume_multiplier;   // Множитель объема для подтверждения
+    int                     m_trend_confirmation;  // Период подтверждения тренда
+    
+    // --- Хэндлы индикаторов ---
+    int                     m_h_donchian;
+    int                     m_h_volume;
+    
+public:
+    /**
+     * @brief Конструктор
+     */
+    CStrategy_DonchianBreakout() : m_patterns(NULL),
+                                   m_figures(NULL),
+                                   m_strategy_id("DonchianBreakout"),
+                                   m_symbol(""),
+                                   m_timeframe(PERIOD_H1),
+                                   m_donchian_period(20),
+                                   m_breakout_threshold(5.0),
+                                   m_confirmation_bars(2),
+                                   m_min_channel_width(20.0),
+                                   m_volume_multiplier(1.5),
+                                   m_trend_confirmation(10),
+                                   m_h_donchian(INVALID_HANDLE),
+                                   m_h_volume(INVALID_HANDLE)
+    {}
+    
+    /**
+     * @brief Деструктор
+     */
+    ~CStrategy_DonchianBreakout() {
+        if(m_h_donchian != INVALID_HANDLE) IndicatorRelease(m_h_donchian);
+        if(m_h_volume != INVALID_HANDLE) IndicatorRelease(m_h_volume);
+    }
+    
+    /**
+     * @brief Инициализация стратегии
+     * @param patterns_ptr Указатель на модуль паттернов
+     * @param figures_ptr Указатель на модуль фигур
+     * @param symbol Торговый символ
+     * @param timeframe Таймфрейм
+     */
+    void Initialize(CPatterns* patterns_ptr, CFigures* figures_ptr, 
+                   const string symbol, ENUM_TIMEFRAMES timeframe) {
+        m_patterns = patterns_ptr;
+        m_figures = figures_ptr;
+        m_symbol = (symbol == "") ? Symbol() : symbol;
+        m_timeframe = timeframe;
+        
+        // Создаем хэндлы индикаторов
+        m_h_donchian = iCustom(m_symbol, m_timeframe, "Donchian_Channel", m_donchian_period);
+        m_h_volume = iVolumes(m_symbol, m_timeframe, VOLUME_TICK);
+        
+        if(m_h_donchian == INVALID_HANDLE || m_h_volume == INVALID_HANDLE) {
+            Print("Donchian Breakout Strategy: Failed to create indicator handles");
+        }
+        
+        Print("Donchian Breakout Strategy: Initialized for ", m_symbol, " on ", EnumToString(m_timeframe));
+    }
+    
+    /**
+     * @brief Основной метод генерации сигналов
+     * @param current_regime Текущий режим рынка
+     * @return Структура сигнала-кандидата
+     */
+    SignalCandidate GetSignal(E_MarketRegime current_regime = REGIME_UNDEFINED) {
+        SignalCandidate candidate;
+        candidate.strategyID = m_strategy_id;
+        candidate.symbol = m_symbol;
+        candidate.timeframe = EnumToString(m_timeframe);
+        candidate.signal_time = TimeCurrent();
+        
+        // Проверяем режим рынка (предпочтительно трендовые режимы)
+        if(current_regime != REGIME_TREND_STRONG && 
+           current_regime != REGIME_TREND_WEAKENING &&
+           current_regime != REGIME_UNDEFINED) {
+            candidate.signal_reason = "Market regime not suitable for breakout strategy";
+            return candidate;
+        }
+        
+        // Получаем данные канала Дончиана
+        double donchian_upper[5], donchian_lower[5], donchian_middle[5];
+        if(CopyBuffer(m_h_donchian, 0, 0, 5, donchian_upper) < 5 ||   // Верхняя линия
+           CopyBuffer(m_h_donchian, 1, 0, 5, donchian_lower) < 5 ||   // Нижняя линия
+           CopyBuffer(m_h_donchian, 2, 0, 5, donchian_middle) < 5) {  // Средняя линия
+            candidate.signal_reason = "Failed to get Donchian Channel data";
+            return candidate;
+        }
+        
+        // Получаем текущие цены
+        MqlRates rates[5];
+        if(CopyRates(m_symbol, m_timeframe, 0, 5, rates) < 5) {
+            candidate.signal_reason = "Failed to get price data";
+            return candidate;
+        }
+        
+        // Проверяем ширину канала
+        double channel_width = (donchian_upper[0] - donchian_lower[0]) / _Point;
+        if(channel_width < m_min_channel_width) {
+            candidate.signal_reason = StringFormat("Channel width too small: %.1f < %.1f pips", 
+                                                 channel_width, m_min_channel_width);
+            return candidate;
+        }
+        
+        // Анализируем пробой
+        int breakout_direction = AnalyzeBreakout(rates, donchian_upper, donchian_lower);
+        if(breakout_direction == 0) {
+            candidate.signal_reason = "No significant breakout detected";
+            return candidate;
+        }
+        
+        // Проверяем подтверждение пробоя
+        if(!ConfirmBreakout(rates, donchian_upper, donchian_lower, breakout_direction)) {
+            candidate.signal_reason = "Breakout not confirmed";
+            return candidate;
+        }
+        
+        // Проверяем объем
+        if(!CheckVolumeConfirmation()) {
+            candidate.signal_reason = "Volume confirmation failed";
+            return candidate;
+        }
+        
+        // Рассчитываем торговые уровни
+        double entry_price = SymbolInfoDouble(m_symbol, SYMBOL_BID);
+        double stop_loss, take_profit;
+        
+        if(breakout_direction > 0) {
+            // Пробой вверх
+            stop_loss = donchian_lower[0] - (m_breakout_threshold * _Point);
+            take_profit = entry_price + (channel_width * _Point * 1.5); // 1.5x ширина канала
+        } else {
+            // Пробой вниз
+            stop_loss = donchian_upper[0] + (m_breakout_threshold * _Point);
+            take_profit = entry_price - (channel_width * _Point * 1.5); // 1.5x ширина канала
+        }
+        
+        // Проверяем R:R соотношение
+        double risk_reward = CalculateRiskReward(entry_price, stop_loss, take_profit, breakout_direction);
+        if(risk_reward < 1.0) {
+            candidate.signal_reason = StringFormat("Risk/Reward ratio too low: %.2f", risk_reward);
+            return candidate;
+        }
+        
+        // Формируем валидный сигнал
+        candidate.isValid = true;
+        candidate.direction = breakout_direction;
+        candidate.entry_price = entry_price;
+        candidate.stop_loss = stop_loss;
+        candidate.take_profit = take_profit;
+        candidate.confidence_score = CalculateConfidenceScore(channel_width, breakout_direction);
+        candidate.risk_reward_ratio = risk_reward;
+        candidate.signal_reason = StringFormat("Donchian Breakout: %s, channel %.1f pips, R:R %.2f", 
+                                             (breakout_direction > 0) ? "Bullish" : "Bearish",
+                                             channel_width, risk_reward);
+        
+        return candidate;
+    }
+    
+private:
+    /**
+     * @brief Анализ пробоя канала Дончиана
+     * @param rates Массив ценовых данных
+     * @param upper Верхняя линия канала
+     * @param lower Нижняя линия канала
+     * @return 1 для пробоя вверх, -1 для пробоя вниз, 0 если нет пробоя
+     */
+    int AnalyzeBreakout(const MqlRates &rates[], const double &upper[], const double &lower[]) {
+        double threshold = m_breakout_threshold * _Point;
+        
+        // Проверяем пробой вверх
+        if(rates[0].close > upper[0] + threshold) {
+            // Проверяем, что цена была внутри канала на предыдущих барах
+            bool was_inside = true;
+            for(int i = 1; i < m_confirmation_bars; i++) {
+                if(rates[i].close > upper[i] || rates[i].close < lower[i]) {
+                    was_inside = false;
+                    break;
+                }
+            }
+            
+            if(was_inside) return 1;
+        }
+        
+        // Проверяем пробой вниз
+        if(rates[0].close < lower[0] - threshold) {
+            // Проверяем, что цена была внутри канала на предыдущих барах
+            bool was_inside = true;
+            for(int i = 1; i < m_confirmation_bars; i++) {
+                if(rates[i].close > upper[i] || rates[i].close < lower[i]) {
+                    was_inside = false;
+                    break;
+                }
+            }
+            
+            if(was_inside) return -1;
+        }
+        
+        return 0;
+    }
+    
+    /**
+     * @brief Подтверждение пробоя
+     * @param rates Массив ценовых данных
+     * @param upper Верхняя линия канала
+     * @param lower Нижняя линия канала
+     * @param direction Направление пробоя
+     * @return true если пробой подтвержден
+     */
+    bool ConfirmBreakout(const MqlRates &rates[], const double &upper[], const double &lower[], int direction) {
+        int confirmation_count = 0;
+        
+        for(int i = 0; i < m_confirmation_bars; i++) {
+            if(direction > 0) {
+                // Для пробоя вверх проверяем, что цена остается выше верхней линии
+                if(rates[i].close > upper[i]) {
+                    confirmation_count++;
+                }
+            } else {
+                // Для пробоя вниз проверяем, что цена остается ниже нижней линии
+                if(rates[i].close < lower[i]) {
+                    confirmation_count++;
+                }
+            }
+        }
+        
+        return confirmation_count >= m_confirmation_bars;
+    }
+    
+    /**
+     * @brief Проверка подтверждения объемом
+     * @return true если объем подтверждает пробой
+     */
+    bool CheckVolumeConfirmation() {
+        double volume[10];
+        if(CopyBuffer(m_h_volume, 0, 0, 10, volume) < 10) {
+            return true; // Если не можем получить данные объема, пропускаем проверку
+        }
+        
+        // Рассчитываем средний объем за последние 10 баров
+        double avg_volume = 0;
+        for(int i = 1; i < 10; i++) {
+            avg_volume += volume[i];
+        }
+        avg_volume /= 9;
+        
+        // Проверяем, превышает ли текущий объем средний
+        return volume[0] > (avg_volume * m_volume_multiplier);
+    }
+    
+    /**
+     * @brief Расчет confidence score
+     * @param channel_width Ширина канала
+     * @param direction Направление пробоя
+     * @return Confidence score от 0.0 до 1.0
+     */
+    double CalculateConfidenceScore(double channel_width, int direction) {
+        double score = 0.0;
+        
+        // Базовый score от ширины канала
+        if(channel_width > m_min_channel_width * 2) {
+            score += 0.4;
+        } else if(channel_width > m_min_channel_width) {
+            score += 0.3;
+        } else {
+            score += 0.2;
+        }
+        
+        // Бонус за подтверждение пробоя
+        score += 0.3;
+        
+        // Бонус за подтверждение объемом
+        score += 0.2;
+        
+        // Бонус за силу пробоя
+        score += 0.1;
+        
+        return MathMin(1.0, score);
+    }
+    
+    /**
+     * @brief Расчет Risk/Reward соотношения
+     */
+    double CalculateRiskReward(double entry, double sl, double tp, int direction) {
+        double risk = MathAbs(entry - sl);
+        double reward = MathAbs(tp - entry);
+        
+        if(risk == 0) return 0;
+        return reward / risk;
+    }
+};

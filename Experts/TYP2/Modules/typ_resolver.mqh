@@ -71,6 +71,12 @@ private:
     int                     m_macro_decisions;
     int                     m_confluence_decisions;
     
+    // --- Матрица Конфликтов и Конфлюэнса ---
+    double                  m_conflict_matrix[10][10];  // Матрица конфликтов между стратегиями
+    double                  m_confluence_matrix[10][10]; // Матрица конфлюэнса между стратегиями
+    string                  m_strategy_names[10];       // Названия стратегий для индексации
+    int                     m_strategy_count;           // Количество зарегистрированных стратегий
+    
 public:
     /**
      * @brief Конструктор Resolver
@@ -93,8 +99,12 @@ public:
                   m_confidence_scaling(1.5),
                   m_total_decisions(0),
                   m_macro_decisions(0),
-                  m_confluence_decisions(0)
-    {}
+                  m_confluence_decisions(0),
+                  m_strategy_count(0)
+    {
+        // Инициализация матриц конфликтов и конфлюэнса
+        InitializeConflictConfluenceMatrices();
+    }
     
     /**
      * @brief Деструктор Resolver
@@ -159,7 +169,13 @@ public:
             return instruction;
         }
         
-        // ЭТАП 2: Скоринг и Confluence анализ (Уровень 2)
+        // ЭТАП 2: Анализ конфликтов между кандидатами
+        if(AnalyzeConflicts(candidates, candidates_count)) {
+            instruction.decision_reason = "Critical conflicts detected - all signals blocked";
+            return instruction;
+        }
+        
+        // ЭТАП 3: Скоринг и Confluence анализ (Уровень 2)
         // TODO: Интеграция с Rules Engine для динамической оценки кандидатов
         // candidates = g_RulesEngine.FilterCandidates(candidates, candidates_count, market_context);
         
@@ -168,7 +184,7 @@ public:
             return ProcessSingleCandidate(candidates[0]);
         }
         
-        // ЭТАП 3: Множественные кандидаты - ищем confluence
+        // ЭТАП 4: Множественные кандидаты - ищем confluence
         // TODO: Адаптивные веса confluence на основе Rules Engine
         // return ProcessMultipleCandidatesWithRules(candidates, candidates_count);
         return ProcessMultipleCandidates(candidates, candidates_count);
@@ -489,5 +505,208 @@ private:
         } else {
             return "STOP"; // Большое расстояние - стоп ордер
         }
+    }
+    
+    /**
+     * @brief Инициализация матриц конфликтов и конфлюэнса
+     */
+    void InitializeConflictConfluenceMatrices() {
+        // Инициализируем названия стратегий
+        m_strategy_names[0] = "NightMR";
+        m_strategy_names[1] = "ChannelBoundary";
+        m_strategy_names[2] = "FalseBreakout";
+        m_strategy_names[3] = "DualMA_Anchor";
+        m_strategy_names[4] = "DonchianBreakout";
+        m_strategy_count = 5;
+        
+        // Инициализируем матрицу конфликтов
+        // 0.0 = нет конфликта, 1.0 = полный конфликт
+        for(int i = 0; i < 10; i++) {
+            for(int j = 0; j < 10; j++) {
+                if(i == j) {
+                    m_conflict_matrix[i][j] = 0.0; // Стратегия не конфликтует сама с собой
+                } else {
+                    m_conflict_matrix[i][j] = 0.5; // Базовый уровень конфликта
+                }
+            }
+        }
+        
+        // Специфические конфликты между стратегиями
+        // NightMR vs Trend strategies (высокий конфликт)
+        SetConflictLevel("NightMR", "DualMA_Anchor", 0.9);
+        SetConflictLevel("NightMR", "DonchianBreakout", 0.9);
+        
+        // ChannelBoundary vs FalseBreakout (средний конфликт)
+        SetConflictLevel("ChannelBoundary", "FalseBreakout", 0.7);
+        
+        // Trend strategies между собой (низкий конфликт)
+        SetConflictLevel("DualMA_Anchor", "DonchianBreakout", 0.3);
+        
+        // Инициализируем матрицу конфлюэнса
+        // 0.0 = нет конфлюэнса, 1.0 = полная конфлюэнса
+        for(int i = 0; i < 10; i++) {
+            for(int j = 0; j < 10; j++) {
+                if(i == j) {
+                    m_confluence_matrix[i][j] = 1.0; // Стратегия полностью конфлюэнтна сама с собой
+                } else {
+                    m_confluence_matrix[i][j] = 0.0; // Базовый уровень конфлюэнса
+                }
+            }
+        }
+        
+        // Специфическая конфлюэнса между стратегиями
+        // Trend strategies имеют высокую конфлюэнса
+        SetConfluenceLevel("DualMA_Anchor", "DonchianBreakout", 0.8);
+        
+        // Flat strategies имеют среднюю конфлюэнса
+        SetConfluenceLevel("ChannelBoundary", "FalseBreakout", 0.6);
+        
+        Print("Resolver: Conflict and Confluence matrices initialized with ", m_strategy_count, " strategies");
+    }
+    
+    /**
+     * @brief Установка уровня конфликта между стратегиями
+     * @param strategy1 Первая стратегия
+     * @param strategy2 Вторая стратегия
+     * @param conflict_level Уровень конфликта (0.0 - 1.0)
+     */
+    void SetConflictLevel(const string strategy1, const string strategy2, double conflict_level) {
+        int idx1 = GetStrategyIndex(strategy1);
+        int idx2 = GetStrategyIndex(strategy2);
+        
+        if(idx1 >= 0 && idx2 >= 0) {
+            m_conflict_matrix[idx1][idx2] = conflict_level;
+            m_conflict_matrix[idx2][idx1] = conflict_level; // Симметричная матрица
+        }
+    }
+    
+    /**
+     * @brief Установка уровня конфлюэнса между стратегиями
+     * @param strategy1 Первая стратегия
+     * @param strategy2 Вторая стратегия
+     * @param confluence_level Уровень конфлюэнса (0.0 - 1.0)
+     */
+    void SetConfluenceLevel(const string strategy1, const string strategy2, double confluence_level) {
+        int idx1 = GetStrategyIndex(strategy1);
+        int idx2 = GetStrategyIndex(strategy2);
+        
+        if(idx1 >= 0 && idx2 >= 0) {
+            m_confluence_matrix[idx1][idx2] = confluence_level;
+            m_confluence_matrix[idx2][idx1] = confluence_level; // Симметричная матрица
+        }
+    }
+    
+    /**
+     * @brief Получение индекса стратегии по названию
+     * @param strategy_name Название стратегии
+     * @return Индекс стратегии или -1 если не найдена
+     */
+    int GetStrategyIndex(const string strategy_name) {
+        for(int i = 0; i < m_strategy_count; i++) {
+            if(m_strategy_names[i] == strategy_name) {
+                return i;
+            }
+        }
+        return -1;
+    }
+    
+    /**
+     * @brief Анализ конфликтов между кандидатами
+     * @param candidates Массив кандидатов
+     * @param candidates_count Количество кандидатов
+     * @return true если обнаружены критические конфликты
+     */
+    bool AnalyzeConflicts(SignalCandidate &candidates[], int candidates_count) {
+        for(int i = 0; i < candidates_count; i++) {
+            for(int j = i + 1; j < candidates_count; j++) {
+                // Проверяем конфликт по направлению
+                if(candidates[i].direction != candidates[j].direction) {
+                    int idx1 = GetStrategyIndex(candidates[i].strategyID);
+                    int idx2 = GetStrategyIndex(candidates[j].strategyID);
+                    
+                    if(idx1 >= 0 && idx2 >= 0) {
+                        double conflict_level = m_conflict_matrix[idx1][idx2];
+                        
+                        // Если конфликт критический (выше 0.8), блокируем оба сигнала
+                        if(conflict_level > 0.8) {
+                            candidates[i].isValid = false;
+                            candidates[i].signal_reason = StringFormat("Critical conflict with %s (level: %.2f)", 
+                                                                     candidates[j].strategyID, conflict_level);
+                            candidates[j].isValid = false;
+                            candidates[j].signal_reason = StringFormat("Critical conflict with %s (level: %.2f)", 
+                                                                     candidates[i].strategyID, conflict_level);
+                            
+                            Print("Resolver: Critical conflict detected between ", candidates[i].strategyID, 
+                                  " and ", candidates[j].strategyID, " (level: ", conflict_level, ")");
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        return false;
+    }
+    
+    /**
+     * @brief Расчет конфлюэнса между кандидатами
+     * @param candidates Массив кандидатов
+     * @param candidates_count Количество кандидатов
+     * @return Общий уровень конфлюэнса (0.0 - 1.0)
+     */
+    double CalculateConfluence(SignalCandidate &candidates[], int candidates_count) {
+        if(candidates_count < 2) return 0.0;
+        
+        double total_confluence = 0.0;
+        int confluence_pairs = 0;
+        
+        for(int i = 0; i < candidates_count; i++) {
+            for(int j = i + 1; j < candidates_count; j++) {
+                // Проверяем конфлюэнса только для сигналов в одном направлении
+                if(candidates[i].direction == candidates[j].direction) {
+                    int idx1 = GetStrategyIndex(candidates[i].strategyID);
+                    int idx2 = GetStrategyIndex(candidates[j].strategyID);
+                    
+                    if(idx1 >= 0 && idx2 >= 0) {
+                        double confluence_level = m_confluence_matrix[idx1][idx2];
+                        total_confluence += confluence_level;
+                        confluence_pairs++;
+                    }
+                }
+            }
+        }
+        
+        if(confluence_pairs == 0) return 0.0;
+        return total_confluence / confluence_pairs;
+    }
+    
+    /**
+     * @brief Применение конфлюэнса к confidence score
+     * @param base_confidence Базовый confidence score
+     * @param confluence_level Уровень конфлюэнса
+     * @return Скорректированный confidence score
+     */
+    double ApplyConfluenceBoost(double base_confidence, double confluence_level) {
+        // Конфлюэнса увеличивает confidence score
+        double boost = confluence_level * 0.3; // Максимальный бонус 30%
+        return MathMin(1.0, base_confidence + boost);
+    }
+    
+    /**
+     * @brief Получение статистики матриц
+     * @param stats_string Строка со статистикой (выходной параметр)
+     */
+    void GetMatrixStats(string &stats_string) {
+        int high_conflicts = 0;
+        int high_confluences = 0;
+        
+        for(int i = 0; i < m_strategy_count; i++) {
+            for(int j = i + 1; j < m_strategy_count; j++) {
+                if(m_conflict_matrix[i][j] > 0.7) high_conflicts++;
+                if(m_confluence_matrix[i][j] > 0.7) high_confluences++;
+            }
+        }
+        
+        stats_string = StringFormat("Matrix Stats: Strategies=%d, High Conflicts=%d, High Confluences=%d",
+                                   m_strategy_count, high_conflicts, high_confluences);
     }
 };
