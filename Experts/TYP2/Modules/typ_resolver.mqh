@@ -4,6 +4,7 @@
 #property copyright "TYP2"
 
 #include "typ_strategies.mqh"
+#include "typ_ai_layer.mqh"
 
 /**
  * @brief Структура торгового приказа от Resolver
@@ -55,6 +56,7 @@ private:
     // --- Указатели на модули ---
     CFigures*               m_figures;
     CPatterns*              m_patterns;
+    CAiLayer*               m_ai_layer;
     
     // --- Параметры Resolver ---
     double                  m_min_confidence_threshold;    // Минимальная уверенность для торговли
@@ -106,6 +108,7 @@ public:
      */
     CResolver() : m_figures(NULL),
                   m_patterns(NULL),
+                  m_ai_layer(NULL),
                   m_min_confidence_threshold(0.7),
                   m_confluence_multiplier(1.3),
                   m_macro_figure_priority(2.0),
@@ -149,10 +152,16 @@ public:
      * @brief Инициализация Resolver
      * @param figures_ptr Указатель на модуль фигур
      * @param patterns_ptr Указатель на модуль паттернов
+     * @param ai_layer_ptr Указатель на AI-Слой (опционально)
      */
-    void Initialize(CFigures* figures_ptr, CPatterns* patterns_ptr) {
+    void Initialize(CFigures* figures_ptr, CPatterns* patterns_ptr, CAiLayer* ai_layer_ptr = NULL) {
         m_figures = figures_ptr;
         m_patterns = patterns_ptr;
+        m_ai_layer = ai_layer_ptr;
+        
+        Print("Resolver: Initialized with figures=", (figures_ptr != NULL ? "YES" : "NO"), 
+              ", patterns=", (patterns_ptr != NULL ? "YES" : "NO"),
+              ", AI layer=", (ai_layer_ptr != NULL ? "YES" : "NO"));
     }
     
     /**
@@ -217,6 +226,11 @@ public:
         // ЭТАП 4: Анализ контртрендовых возможностей
         if(AnalyzeCountertrendOpportunities(candidates, candidates_count, REGIME_UNDEFINED)) {
             Print("Resolver: Countertrend opportunity detected and processed");
+        }
+        
+        // ЭТАП 4.5: AI-анализ вероятности сигналов (если AI-Слой доступен)
+        if(m_ai_layer != NULL && m_ai_layer->IsInitialized() && m_ai_layer->IsAiAnalysisEnabled()) {
+            ApplyAiAnalysis(candidates, candidates_count);
         }
         
         // ЭТАП 5: Скоринг и Confluence анализ (Уровень 2)
@@ -995,5 +1009,61 @@ private:
                                    m_volume_filter_threshold, m_volatility_filter,
                                    m_enable_countertrend ? "ON" : "OFF",
                                    m_countertrend_attempts, m_countertrend_max_attempts);
+    }
+    
+    /**
+     * @brief Применение AI-анализа к кандидатам
+     * @param candidates Массив кандидатов
+     * @param candidates_count Количество кандидатов
+     */
+    void ApplyAiAnalysis(SignalCandidate &candidates[], int candidates_count) {
+        if(m_ai_layer == NULL || !m_ai_layer->IsInitialized()) {
+            return;
+        }
+        
+        string market_context = StringFormat("Regime=%s, Time=%s", 
+                                           EnumToString(REGIME_UNDEFINED), 
+                                           TimeToString(TimeCurrent()));
+        
+        for(int i = 0; i < candidates_count; i++) {
+            if(!candidates[i].isValid) continue;
+            
+            // Получаем AI-оценку вероятности
+            double ai_probability = m_ai_layer->IsSignalProbable(candidates[i], market_context);
+            
+            // Корректируем confidence score на основе AI-анализа
+            double original_confidence = candidates[i].confidence_score;
+            candidates[i].confidence_score = (original_confidence + ai_probability) / 2.0;
+            
+            // Если AI-анализ показывает низкую вероятность, помечаем как невалидный
+            if(ai_probability < 0.3) {
+                candidates[i].isValid = false;
+                candidates[i].signal_reason = StringFormat("AI analysis: Low probability %.2f", ai_probability);
+            } else {
+                candidates[i].signal_reason += StringFormat(" | AI: %.2f", ai_probability);
+            }
+            
+            Print("Resolver: AI analysis applied - Strategy: ", candidates[i].strategyID, 
+                  ", Original: ", DoubleToString(original_confidence, 3),
+                  ", AI: ", DoubleToString(ai_probability, 3),
+                  ", Final: ", DoubleToString(candidates[i].confidence_score, 3));
+        }
+    }
+    
+    /**
+     * @brief Установка указателя на AI-Слой
+     * @param ai_layer_ptr Указатель на AI-Слой
+     */
+    void SetAiLayer(CAiLayer* ai_layer_ptr) {
+        m_ai_layer = ai_layer_ptr;
+        Print("Resolver: AI Layer pointer set to ", (ai_layer_ptr != NULL ? "VALID" : "NULL"));
+    }
+    
+    /**
+     * @brief Получение указателя на AI-Слой
+     * @return Указатель на AI-Слой
+     */
+    CAiLayer* GetAiLayer() const {
+        return m_ai_layer;
     }
 };

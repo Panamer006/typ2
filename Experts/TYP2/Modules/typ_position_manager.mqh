@@ -3,6 +3,8 @@
 // Task: T2-PM :: Position Manager
 #property copyright "TYP2"
 
+#include "typ_ai_layer.mqh"
+
 #include "typ_regime_engine.mqh"
 #include "typ_risk.mqh" // Для "Освобождения Риска"
 #include <Arrays/ArrayObj.mqh>
@@ -138,6 +140,7 @@ private:
     // --- СОСТОЯНИЕ КЛАССА ---
     CManagedPositionsList* m_managed_positions; // Динамический массив управляемых позиций
     CRiskManager* m_risk_manager_ptr; // Указатель на риск-менеджер
+    CAiLayer* m_ai_layer_ptr; // Указатель на AI-Слой
     CTrade m_trade; // Объект для торговых операций
     int m_h_rsi; // Хэндл RSI для дивергенций
 
@@ -146,6 +149,7 @@ public:
     CPositionManager();
     ~CPositionManager();
     void Initialize(CRiskManager* risk_manager, 
+                   CAiLayer* ai_layer = NULL,
                    bool impulse_confirmation_be = true,
                    int max_addons = 2,
                    double tp1_level = 1.5,
@@ -157,6 +161,11 @@ public:
     void AddNewPosition(ulong ticket, int signal_category, double signal_score = 0.5);
     void RemoveClosedPositions();
     void SynchronizeState();
+    
+    // --- Методы для работы с AI-Слоем ---
+    void SetAiLayer(CAiLayer* ai_layer_ptr);
+    CAiLayer* GetAiLayer() const;
+    void GetAiPositionStats(string &stats_string);
 
 private:
     // --- Приватные Методы-Обработчики ---
@@ -210,6 +219,7 @@ CPositionManager::~CPositionManager() {
 //| Инициализация                                                    |
 //+------------------------------------------------------------------+
 void CPositionManager::Initialize(CRiskManager* risk_manager, 
+                                 CAiLayer* ai_layer = NULL,
                                  bool impulse_confirmation_be = true,
                                  int max_addons = 2,
                                  double tp1_level = 1.5,
@@ -219,6 +229,7 @@ void CPositionManager::Initialize(CRiskManager* risk_manager,
                                  double adr_exit = 80.0) {
     
     m_risk_manager_ptr = risk_manager;
+    m_ai_layer_ptr = ai_layer;
     m_is_impulse_confirmation_be_enabled = impulse_confirmation_be;
     m_max_addons_per_position = max_addons;
     m_tp1_level_R = tp1_level;
@@ -428,6 +439,24 @@ void CPositionManager::HandleAddons(ManagedPosition* pos, E_MarketRegime regime)
     
     // Проверка временного интервала (не чаще раза в час)
     if(TimeCurrent() - pos.last_addon_time < 3600) return;
+    
+    // AI-анализ тактики управления позицией (если AI-Слой доступен)
+    if(m_ai_layer_ptr != NULL && m_ai_layer_ptr->IsInitialized() && m_ai_layer_ptr->IsAiAnalysisEnabled()) {
+        string position_info = StringFormat("Ticket=%d, Symbol=%s, Category=%d, Score=%.2f", 
+                                          pos->ticket, pos->symbol, pos->signal_category, pos->signal_score);
+        string market_context = StringFormat("Regime=%s, Addons=%d, Profit_R=%.2f", 
+                                           EnumToString(regime), pos->addons_count, profit_R);
+        
+        string ai_tactic = m_ai_layer_ptr->SuggestTactic(position_info, market_context);
+        
+        // Если AI рекомендует не добавлять позицию, пропускаем
+        if(StringFind(ai_tactic, "avoid") >= 0 || StringFind(ai_tactic, "no addon") >= 0) {
+            Print("Position Manager: AI recommendation - ", ai_tactic, " for position ", pos->ticket);
+            return;
+        }
+        
+        Print("Position Manager: AI tactic suggestion - ", ai_tactic, " for position ", pos->ticket);
+    }
     
     // Простая проверка сигнала продолжения (новый локальный экстремум)
     if(!PositionSelectByTicket(pos.ticket)) return;
@@ -748,4 +777,43 @@ void CPositionManager::SynchronizeState() {
     int final_count = m_managed_positions.Total();
     Print("Position Manager: Synchronization complete. Managed positions: ", initial_count, " -> ", final_count, 
           " (removed: ", removed_count, ", added: ", added_count, ")");
+}
+
+//+------------------------------------------------------------------+
+//| Методы для работы с AI-Слоем                                     |
+//+------------------------------------------------------------------+
+
+/**
+ * @brief Установка указателя на AI-Слой
+ * @param ai_layer_ptr Указатель на AI-Слой
+ */
+void CPositionManager::SetAiLayer(CAiLayer* ai_layer_ptr) {
+    m_ai_layer_ptr = ai_layer_ptr;
+    Print("Position Manager: AI Layer pointer set to ", (ai_layer_ptr != NULL ? "VALID" : "NULL"));
+}
+
+/**
+ * @brief Получение указателя на AI-Слой
+ * @return Указатель на AI-Слой
+ */
+CAiLayer* CPositionManager::GetAiLayer() const {
+    return m_ai_layer_ptr;
+}
+
+/**
+ * @brief Получение статистики AI-анализа позиций
+ * @param stats_string Строка со статистикой (выходной параметр)
+ */
+void CPositionManager::GetAiPositionStats(string &stats_string) {
+    if(m_ai_layer_ptr == NULL || !m_ai_layer_ptr->IsInitialized()) {
+        stats_string = "AI Layer: Not available";
+        return;
+    }
+    
+    string ai_stats;
+    m_ai_layer_ptr->GetAiStats(ai_stats);
+    
+    int managed_positions = m_managed_positions->Total();
+    stats_string = StringFormat("Position Manager AI Stats: Managed=%d, %s", 
+                               managed_positions, ai_stats);
 }
