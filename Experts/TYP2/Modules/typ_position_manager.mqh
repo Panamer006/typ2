@@ -156,6 +156,7 @@ public:
     void OnTick(E_MarketRegime current_regime);
     void AddNewPosition(ulong ticket, int signal_category, double signal_score = 0.5);
     void RemoveClosedPositions();
+    void SynchronizeState();
 
 private:
     // --- Приватные Методы-Обработчики ---
@@ -685,4 +686,66 @@ double CPositionManager::GetVolumeRatioForRegime(E_MarketRegime regime, int tp_l
         default:
             return base_ratio;
     }
+}
+
+//+------------------------------------------------------------------+
+//| Синхронизация состояния с реальными позициями                   |
+//+------------------------------------------------------------------+
+void CPositionManager::SynchronizeState() {
+    Print("Position Manager: Starting state synchronization...");
+    
+    int initial_count = m_managed_positions.Total();
+    int removed_count = 0;
+    int added_count = 0;
+    
+    // Проверяем каждую управляемую позицию
+    for(int i = m_managed_positions.Total() - 1; i >= 0; i--) {
+        ManagedPosition* pos = m_managed_positions.At(i);
+        if(pos == NULL) continue;
+        
+        bool position_exists = false;
+        
+        // Проверяем существование позиции
+        if(PositionSelectByTicket(pos.ticket)) {
+            // Позиция существует, проверяем ее актуальность
+            if(PositionGetInteger(POSITION_MAGIC) == MAGIC_NUMBER) {
+                position_exists = true;
+            }
+        }
+        
+        // Если позиция не существует, удаляем ее из управления
+        if(!position_exists) {
+            Print("Position Manager: Removing non-existent position ", pos.ticket, " from management");
+            m_managed_positions.RemoveByTicket(pos.ticket);
+            removed_count++;
+        }
+    }
+    
+    // Проверяем наличие новых позиций, которые не управляются
+    int total_positions = PositionsTotal();
+    for(int i = 0; i < total_positions; i++) {
+        if(PositionGetTicket(i) > 0) {
+            ulong ticket = PositionGetTicket(i);
+            
+            // Проверяем, управляется ли уже эта позиция
+            if(m_managed_positions.FindByTicket(ticket) != NULL) {
+                continue; // Уже управляется
+            }
+            
+            // Если позиция имеет наш Magic Number, добавляем ее
+            if(PositionGetInteger(POSITION_MAGIC) == MAGIC_NUMBER) {
+                string symbol = PositionGetString(POSITION_SYMBOL);
+                int signal_category = 1; // Автообнаруженная позиция
+                double signal_score = 0.5; // Средний score
+                
+                AddNewPosition(ticket, signal_category, signal_score);
+                added_count++;
+                Print("Position Manager: Auto-detected and added position ", ticket, " for symbol ", symbol);
+            }
+        }
+    }
+    
+    int final_count = m_managed_positions.Total();
+    Print("Position Manager: Synchronization complete. Managed positions: ", initial_count, " -> ", final_count, 
+          " (removed: ", removed_count, ", added: ", added_count, ")");
 }

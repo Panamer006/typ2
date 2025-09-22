@@ -14,6 +14,7 @@ CTrade trade;
 #include "Modules/typ_position_manager.mqh"
 #include "Modules/typ_strategies.mqh"  // Модуль стратегий Sprint 2
 #include "Modules/typ_resolver.mqh"    // Центральный "Мозг" системы
+#include "Modules/typ_timer_manager.mqh" // Менеджер таймеров для дросселирования
 
 // --- Глобальные переменные для движка режимов ---
 CRegimeEngine   g_RegimeEngine;
@@ -34,6 +35,7 @@ CStrategy_NightMR   g_Strategy_NightMR; // Стратегия "Ночной Во
 CStrategy_ChannelBoundary g_Strategy_ChannelBoundary; // Стратегия "Границы Канала"
 CStrategy_FalseBreakout   g_Strategy_FalseBreakout;   // Стратегия "Ложный Пробой"
 CResolver           g_Resolver;         // Центральный "Мозг" системы
+CTimerManager       g_TimerManager;     // Менеджер таймеров для дросселирования
 
 int OnInit()
 {
@@ -92,6 +94,10 @@ int OnInit()
   );
   Print("Position Manager: Initialized");
   
+  // Синхронизация состояния с реальными позициями
+  g_PosManager.SynchronizeState();
+  Print("Position Manager: State synchronized with real positions");
+  
   // --- Инициализация модулей Спринта 2 ---
   // Модули ТА инициализируются автоматически через конструкторы
   Print("Technical Analysis Modules: Patterns, Figures, Fibonacci initialized");
@@ -111,6 +117,10 @@ int OnInit()
   // Инициализация центрального Resolver (Мозг системы)
   g_Resolver.Initialize(&g_Figures, &g_Patterns);
   Print("Central Resolver: Initialized - The Brain is ready");
+  
+  // Инициализация менеджера таймеров (дросселирование вычислений)
+  // g_TimerManager автоматически инициализируется в конструкторе
+  Print("Timer Manager: Initialized - Computation throttling active");
   
   // Инициализация визуального слоя
   Print("Visualization Layer: Initialized");
@@ -318,16 +328,32 @@ void CreateDemoPositionForTesting() {
     }
 }
 void OnTick(){
-  // --- Обновление движка режимов (в самом начале) ---
-  g_RegimeEngine.Update();
-  E_MarketRegime newRegime = g_RegimeEngine.GetCurrentRegime();
+  // --- ОБНОВЛЕНИЕ МЕНЕДЖЕРА ТАЙМЕРОВ ---
+  g_TimerManager.Update();
   
-  // --- Обновление системы управления рисками ---
-  g_RiskManager.OnTick(newRegime);
-  g_ExecGate.OnTick();
+  // --- Обновление движка режимов (дросселирование) ---
+  E_MarketRegime newRegime = g_currentRegime; // Используем кэшированное значение по умолчанию
   
-  // --- Обновление менеджера позиций ---
-  g_PosManager.OnTick(newRegime);
+  if(g_TimerManager.IsTimerReady("MarketRegimeUpdate")) {
+    g_RegimeEngine.Update();
+    newRegime = g_RegimeEngine.GetCurrentRegime();
+    g_currentRegime = newRegime; // Обновляем кэш
+    g_TimerManager.MarkTimerExecuted("MarketRegimeUpdate");
+  }
+  
+  // --- Обновление системы управления рисками (дросселирование) ---
+  if(g_TimerManager.IsTimerReady("RiskAnalysis")) {
+    g_RiskManager.OnTick(newRegime);
+    g_TimerManager.MarkTimerExecuted("RiskAnalysis");
+  }
+  
+  g_ExecGate.OnTick(); // ExecGate обновляется каждый тик для быстрой реакции
+  
+  // --- Обновление менеджера позиций (дросселирование) ---
+  if(g_TimerManager.IsTimerReady("PositionUpdate")) {
+    g_PosManager.OnTick(newRegime);
+    g_TimerManager.MarkTimerExecuted("PositionUpdate");
+  }
   
   // --- Проверка необходимости закрытия позиций (flatten) ---
   if(g_ExecGate.IsFlattenRequired(_Symbol)) {
@@ -384,10 +410,11 @@ void OnTick(){
     }
   }
   
-  // === БЛОК ГЕНЕРАЦИИ СИГНАЛОВ СПРИНТ 2 ===
-  // Собираем сигналы от всех активных стратегий
-  SignalCandidate signal_candidates[10]; // Массив для кандидатов
-  int candidates_count = 0;
+  // === БЛОК ГЕНЕРАЦИИ СИГНАЛОВ СПРИНТ 2 (дросселирование) ===
+  if(g_TimerManager.IsTimerReady("SignalGeneration")) {
+    // Собираем сигналы от всех активных стратегий
+    SignalCandidate signal_candidates[10]; // Массив для кандидатов
+    int candidates_count = 0;
   
   // 1. Стратегия Night Mean Reversion (лучше работает во флэте)
   if (g_currentRegime == REGIME_FLAT_QUIET || g_currentRegime == REGIME_FLAT_CHOPPY || g_currentRegime == REGIME_TREND_WEAKENING) {
@@ -491,11 +518,18 @@ void OnTick(){
           Print("=== NO TRADE DECISION ===");
           Print("Resolver Result: ", trade_instruction.decision_reason);
       }
+    }
+    
+    // Отмечаем выполнение генерации сигналов
+    g_TimerManager.MarkTimerExecuted("SignalGeneration");
   }
   
-  // === БЛОК ВИЗУАЛИЗАЦИИ ТЕХНИЧЕСКОГО АНАЛИЗА ===
-  // Визуализируем найденные паттерны, фигуры и уровни Фибоначчи
-  VisualizeTechnicalAnalysis();
+  // === БЛОК ВИЗУАЛИЗАЦИИ ТЕХНИЧЕСКОГО АНАЛИЗА (дросселирование) ===
+  if(g_TimerManager.IsTimerReady("VisualizationUpdate")) {
+    // Визуализируем найденные паттерны, фигуры и уровни Фибоначчи
+    VisualizeTechnicalAnalysis();
+    g_TimerManager.MarkTimerExecuted("VisualizationUpdate");
+  }
   
   // === ДЕМОНСТРАЦИОННАЯ ТОРГОВАЯ ЛОГИКА ===
   // Симулируем получение торгового сигнала
