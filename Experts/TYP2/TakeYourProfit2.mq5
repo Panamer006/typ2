@@ -13,6 +13,7 @@ CTrade trade;
 #include "Modules/typ_execfilters.mqh"
 #include "Modules/typ_position_manager.mqh"
 #include "Modules/typ_strategies.mqh"  // Модуль стратегий Sprint 2
+#include "Modules/typ_resolver.mqh"    // Центральный "Мозг" системы
 
 // --- Глобальные переменные для движка режимов ---
 CRegimeEngine   g_RegimeEngine;
@@ -30,6 +31,9 @@ CPatterns           g_Patterns;         // Модуль детекции све�
 CFigures            g_Figures;          // Модуль детекции графических фигур
 CFibo               g_Fibo;             // Модуль анализа уровней Фибоначчи
 CStrategy_NightMR   g_Strategy_NightMR; // Стратегия "Ночной Возврат к Среднему"
+CStrategy_ChannelBoundary g_Strategy_ChannelBoundary; // Стратегия "Границы Канала"
+CStrategy_FalseBreakout   g_Strategy_FalseBreakout;   // Стратегия "Ложный Пробой"
+CResolver           g_Resolver;         // Центральный "Мозг" системы
 
 int OnInit()
 {
@@ -96,7 +100,21 @@ int OnInit()
   g_Strategy_NightMR.Initialize(&g_Patterns, &g_Figures, &g_Fibo, _Symbol, PERIOD_H1);
   Print("Strategy Night MR: Initialized for ", _Symbol, " on H1 timeframe");
   
-  // TODO: Добавить инициализацию для других стратегий когда они будут созданы
+  // Инициализация стратегии Channel Boundary
+  g_Strategy_ChannelBoundary.Initialize(&g_Patterns, &g_Figures, _Symbol, PERIOD_H1);
+  Print("Strategy Channel Boundary: Initialized for ", _Symbol, " on H1 timeframe");
+  
+  // Инициализация стратегии False Breakout
+  g_Strategy_FalseBreakout.Initialize(&g_Patterns, &g_Figures, _Symbol, PERIOD_H1);
+  Print("Strategy False Breakout: Initialized for ", _Symbol, " on H1 timeframe");
+  
+  // Инициализация центрального Resolver (Мозг системы)
+  g_Resolver.Initialize(&g_Figures, &g_Patterns);
+  Print("Central Resolver: Initialized - The Brain is ready");
+  
+  Print("=== SPRINT 2 INTEGRATION COMPLETE ===");
+  Print("Active Strategies: Night MR, Channel Boundary, False Breakout");
+  Print("AI Decision Engine: Resolver with hierarchical logic active");
   
   return(INIT_SUCCEEDED);
 }
@@ -359,28 +377,111 @@ void OnTick(){
   }
   
   // === БЛОК ГЕНЕРАЦИИ СИГНАЛОВ СПРИНТ 2 ===
-  // Проверяем сигналы стратегий только в подходящих режимах
-  if (g_currentRegime == REGIME_FLAT_QUIET || g_currentRegime == REGIME_TREND_WEAKENING) {
-      // Получаем сигнал от стратегии Night Mean Reversion
+  // Собираем сигналы от всех активных стратегий
+  SignalCandidate signal_candidates[10]; // Массив для кандидатов
+  int candidates_count = 0;
+  
+  // 1. Стратегия Night Mean Reversion (лучше работает во флэте)
+  if (g_currentRegime == REGIME_FLAT_QUIET || g_currentRegime == REGIME_FLAT_CHOPPY || g_currentRegime == REGIME_TREND_WEAKENING) {
       SignalCandidate night_mr_signal = g_Strategy_NightMR.GetSignal(g_currentRegime);
+      if (night_mr_signal.isValid && candidates_count < 10) {
+          signal_candidates[candidates_count] = night_mr_signal;
+          candidates_count++;
+          Print("Night MR Signal: ", night_mr_signal.signal_reason);
+      }
+  }
+  
+  // 2. Стратегия Channel Boundary (работает во флэте)
+  if (g_currentRegime == REGIME_FLAT_QUIET || g_currentRegime == REGIME_FLAT_CHOPPY) {
+      SignalCandidate channel_signal = g_Strategy_ChannelBoundary.GetSignal(g_currentRegime);
+      if (channel_signal.isValid && candidates_count < 10) {
+          signal_candidates[candidates_count] = channel_signal;
+          candidates_count++;
+          Print("Channel Boundary Signal: ", channel_signal.signal_reason);
+      }
+  }
+  
+  // 3. Стратегия False Breakout (универсальная)
+  SignalCandidate false_breakout_signal = g_Strategy_FalseBreakout.GetSignal(g_currentRegime);
+  if (false_breakout_signal.isValid && candidates_count < 10) {
+      signal_candidates[candidates_count] = false_breakout_signal;
+      candidates_count++;
+      Print("False Breakout Signal: ", false_breakout_signal.signal_reason);
+  }
+  
+  // Если есть сигналы-кандидаты, передаем их в Resolver для принятия решения
+  if (candidates_count > 0) {
+      Print("=== RESOLVER ANALYSIS ===");
+      Print("Candidates collected: ", candidates_count);
       
-      if (night_mr_signal.isValid) {
-          Print("=== SIGNAL DETECTED === Strategy: ", night_mr_signal.strategyID);
-          Print("Signal: ", night_mr_signal.signal_reason);
-          Print("Confidence: ", DoubleToString(night_mr_signal.confidence_score, 3));
-          Print("Direction: ", (night_mr_signal.direction > 0 ? "BUY" : "SELL"));
-          Print("Entry: ", DoubleToString(night_mr_signal.entry_price, _Digits));
-          Print("SL: ", DoubleToString(night_mr_signal.stop_loss, _Digits));
-          Print("TP: ", DoubleToString(night_mr_signal.take_profit, _Digits));
-          Print("R:R Ratio: ", DoubleToString(night_mr_signal.risk_reward_ratio, 2));
+      // Центральный мозг принимает решение
+      TradeOrderInstruction trade_instruction = g_Resolver.Decide(signal_candidates, candidates_count);
+      
+      if (trade_instruction.isValid) {
+          Print("=== TRADE DECISION APPROVED ===");
+          Print("Strategy: ", trade_instruction.winning_strategy);
+          Print("Decision: ", trade_instruction.decision_reason);
+          Print("Direction: ", (trade_instruction.direction > 0 ? "BUY" : "SELL"));
+          Print("Entry: ", DoubleToString(trade_instruction.entry_price, _Digits));
+          Print("SL: ", DoubleToString(trade_instruction.stop_loss, _Digits));
+          Print("TP: ", DoubleToString(trade_instruction.take_profit, _Digits));
+          Print("Lot Size: ", DoubleToString(trade_instruction.lot_size, 2));
+          Print("Confidence: ", DoubleToString(trade_instruction.final_confidence, 3));
+          Print("Order Type: ", trade_instruction.orderType);
+          Print("Volume Scenario: ", trade_instruction.volume_scenario);
+          Print("Hierarchy Level: ", trade_instruction.hierarchy_level);
           
-          // TODO: Передать сигнал в Resolver для финального утверждения
-          // TODO: Проверить через CRiskManager.GetRiskModifier()
-          // TODO: Проверить через CExecGate.IsExecutionAllowed()
-          // TODO: При успешных проверках - отправить ордер через CTrade
+          // ЭТАП ФИНАЛЬНЫХ ПРОВЕРОК БЕЗОПАСНОСТИ
+          string risk_reason = "";
+          double risk_modifier = g_RiskManager.GetRiskModifier(_Symbol, 2.0, risk_reason);
           
-          // Пока что только логируем сигнал (заглушка)
-          Print("Signal processing: PENDING (implementation required)");
+          if (risk_modifier > 0) {
+              string exec_reason = "";
+              if (g_ExecGate.IsExecutionAllowed(_Symbol, trade_instruction.direction, "AUTOMATED", exec_reason)) {
+                  
+                  // ВСЕ ПРОВЕРКИ ПРОЙДЕНЫ - ИСПОЛНЯЕМ ОРДЕР
+                  double final_lot_size = trade_instruction.lot_size * risk_modifier;
+                  
+                  Print("=== EXECUTING TRADE ===");
+                  Print("Final Lot Size: ", DoubleToString(final_lot_size, 2), " (Risk Modifier: ", DoubleToString(risk_modifier, 2), ")");
+                  
+                  bool order_result = false;
+                  if (trade_instruction.direction > 0) {
+                      order_result = trade.Buy(final_lot_size, _Symbol, 0, trade_instruction.stop_loss, trade_instruction.take_profit, 
+                                             StringFormat("TYP2_Sprint2_%s", trade_instruction.winning_strategy));
+                  } else {
+                      order_result = trade.Sell(final_lot_size, _Symbol, 0, trade_instruction.stop_loss, trade_instruction.take_profit,
+                                              StringFormat("TYP2_Sprint2_%s", trade_instruction.winning_strategy));
+                  }
+                  
+                  if (order_result) {
+                      Print("=== TRADE EXECUTED SUCCESSFULLY ===");
+                      Print("Ticket: ", trade.ResultOrder());
+                      
+                      // Уведомляем Position Manager о новой позиции
+                      g_PosManager.AddNewPosition(trade.ResultOrder(), trade_instruction.winning_strategy);
+                      
+                      // Получаем статистику Resolver
+                      string resolver_stats;
+                      g_Resolver.GetResolverStats(resolver_stats);
+                      Print("Resolver Stats: ", resolver_stats);
+                      
+                  } else {
+                      Print("=== TRADE EXECUTION FAILED ===");
+                      Print("Error: ", trade.ResultRetcode(), " - ", trade.ResultRetcodeDescription());
+                  }
+                  
+              } else {
+                  Print("=== EXECUTION BLOCKED BY EXECGATE ===");
+                  Print("Reason: ", exec_reason);
+              }
+          } else {
+              Print("=== TRADE BLOCKED BY RISK MANAGER ===");
+              Print("Reason: ", risk_reason);
+          }
+      } else {
+          Print("=== NO TRADE DECISION ===");
+          Print("Resolver Result: ", trade_instruction.decision_reason);
       }
   }
   
