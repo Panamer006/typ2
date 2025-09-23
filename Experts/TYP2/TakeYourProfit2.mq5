@@ -47,6 +47,17 @@ input int inp_tokyo_start_hour = 0;                             // Начало 
 input int inp_tokyo_end_hour = 9;                               // Конец Токийской сессии (час)
 input double inp_max_slippage_pips = 2.0;                       // Максимальное проскальзывание в пипсах
 
+// --- Inputs для Position Manager ---
+input group "Position Manager Settings"
+input bool inp_is_impulse_confirmation_be_enabled = true;        // Включить подтверждение импульса для BE
+input int inp_max_addons_per_position = 2;                      // Максимальное количество доливок на позицию
+input double inp_profit_lock_r_level = 1.0;                     // Уровень R для Profit Lock
+input double inp_full_be_r_level = 2.0;                         // Уровень R для полного безубытка
+input double inp_tp1_r_level = 1.5;                             // Уровень R для первого TP
+input double inp_tp2_r_level = 3.0;                             // Уровень R для второго TP
+input double inp_tp1_close_percent = 50.0;                      // Процент закрытия на TP1
+input double inp_tp2_close_percent = 30.0;                      // Процент закрытия на TP2
+
 #include <Trade/Trade.mqh>
 CTrade trade;
 
@@ -147,15 +158,15 @@ int OnInit()
   
   // --- Инициализация менеджера позиций ---
   g_PosManager.Initialize(
-    &g_RiskManager, // указатель на риск-менеджер
-    &g_AiLayer,     // указатель на AI-Слой
-    true,   // impulse_confirmation_be
-    2,      // max_addons
-    1.5,    // tp1_level
-    3.0,    // tp2_level
-    50.0,   // tp1_volume
-    30.0,   // tp2_volume
-    80.0    // adr_exit
+    &g_RiskManager,                                    // risk_manager_ptr
+    inp_is_impulse_confirmation_be_enabled,            // is_impulse_confirmation_be_enabled
+    inp_max_addons_per_position,                       // max_addons_per_position
+    inp_profit_lock_r_level,                           // profit_lock_r_level
+    inp_full_be_r_level,                               // full_be_r_level
+    inp_tp1_r_level,                                   // tp1_r_level
+    inp_tp2_r_level,                                   // tp2_r_level
+    inp_tp1_close_percent,                             // tp1_close_percent
+    inp_tp2_close_percent                              // tp2_close_percent
   );
   Print("Position Manager: Initialized with AI Layer");
   
@@ -474,6 +485,15 @@ void OnTick(){
   if(risk_modifier < 1.0) {
     Print("=== RISK MODIFIED === Base risk: ", base_risk, "%, Final risk: ", final_risk, "%, Modifier: ", risk_modifier);
   }
+  
+  // --- ПРИМЕР ИСПОЛЬЗОВАНИЯ POSITION MANAGER ---
+  // После успешного открытия новой сделки, немедленно зарегистрируйте ее в менеджере:
+  // ulong order_ticket = trade.ResultOrder(); // Получаем тикет после открытия
+  // if(order_ticket > 0) {
+  //   double initial_risk = AccountInfoDouble(ACCOUNT_EQUITY) * final_risk / 100.0;
+  //   int signal_category = 0; // 0-Конфлюэнс, 1-Королевский
+  //   g_PosManager.AddNewPosition(order_ticket, signal_category, initial_risk);
+  // }
   
   // --- Реагируем на смену режима ---
   if(newRegime != g_currentRegime) {
