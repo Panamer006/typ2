@@ -1,187 +1,314 @@
 // --- typ_execfilters.mqh ---
 // (c) 2025, Take Your Profit 2.0 Project
-// Task: T2-005 :: ExecGate - Execution Filters
+// Task: T2-005 :: Execution Filters (ExecGate)
 #property copyright "TYP2"
 
 #include "typ_regime_engine.mqh" // Подключаем Движок Режимов
-#include "../typ_quantiles.mqh"   // Подключаем Квантили
-#include <Arrays/ArrayObj.mqh>
+#include <Trade/Trade.mqh>
 
-// --- Структура для хранения новостных событий ---
+// --- Структура для хранения новостей ---
 struct NewsEvent {
-    datetime time;
+    datetime start_time;
+    datetime end_time;
     string   currency;
-    int      importance; // 1-Low, 2-Medium, 3-High
-    bool     is_flatten_event; // True для супер-событий
-    string   event_name;
+    string   title;
+    int      impact; // 0=Low, 1=Medium, 2=High
     
     NewsEvent() {
-        time = 0;
+        start_time = 0;
+        end_time = 0;
         currency = "";
-        importance = 1;
-        is_flatten_event = false;
-        event_name = "";
+        title = "";
+        impact = 0;
+    }
+    
+    NewsEvent(datetime start, datetime end, string curr, string news_title, int imp) {
+        start_time = start;
+        end_time = end;
+        currency = curr;
+        title = news_title;
+        impact = imp;
     }
 };
 
-// --- Класс для управления новостными событиями ---
-class CNewsManager : public CObject {
-private:
-    CArrayObj* m_events;
-    
-public:
-    CNewsManager() {
-        m_events = new CArrayObj();
-    }
-    
-    ~CNewsManager() {
-        if(m_events != NULL) {
-            delete m_events;
-        }
-    }
-    
-    void AddEvent(datetime time, string currency, int importance, string event_name) {
-        NewsEvent* event = new NewsEvent();
-        event.time = time;
-        event.currency = currency;
-        event.importance = importance;
-        event.event_name = event_name;
-        
-        // Определяем супер-события
-        string lower_name = event_name;
-        StringToLower(lower_name);
-        event.is_flatten_event = (StringFind(lower_name, "rate") >= 0 || 
-                                 StringFind(lower_name, "cpi") >= 0 || 
-                                 StringFind(lower_name, "fomc") >= 0 ||
-                                 StringFind(lower_name, "nfp") >= 0 ||
-                                 StringFind(lower_name, "gdp") >= 0);
-        
-        m_events.Add(event);
-    }
-    
-    void Clear() {
-        m_events.Clear();
-    }
-    
-    int Total() {
-        return m_events.Total();
-    }
-    
-    NewsEvent* At(int index) {
-        return (NewsEvent*)m_events.At(index);
-    }
-};
-
+/**
+ * @brief Центральная система фильтров исполнения (ExecGate)
+ * 
+ * Обеспечивает многоуровневую защиту от неблагоприятных условий исполнения:
+ * новостные события, спред, волатильность, сессии и проскальзывание.
+ */
 class CExecGate {
 private:
     // --- ПАРАМЕТРЫ ---
-    // NewsGuard
-    bool   m_is_news_guard_enabled;
-    int    m_news_pre_mins;
-    int    m_news_post_mins;
-    // SpreadGuard
-    double m_spread_atr_multiplier;
-    // SL
-    double m_sl_atr_multiplier_trend;
-    double m_sl_atr_multiplier_flat;
-    // Session Time Stop
-    int    m_session_end_hour;
-    // Volatility Guard
-    double m_min_atr_multiplier;
-    double m_max_atr_multiplier;
-    // Slippage Guard
+    bool m_is_news_guard_enabled;
+    bool m_is_spread_guard_enabled;
+    bool m_is_volatility_guard_enabled;
+    bool m_is_session_guard_enabled;
+    bool m_is_slippage_guard_enabled;
+    
+    // Параметры NewsGuard
+    int m_news_block_minutes_before;
+    int m_news_block_minutes_after;
+    int m_high_impact_block_minutes;
+    int m_medium_impact_block_minutes;
+    int m_low_impact_block_minutes;
+    
+    // Параметры SpreadGuard
+    double m_max_spread_pips;
+    double m_atr_multiplier_for_spread;
+    
+    // Параметры VolatilityGuard
+    double m_max_volatility_percent;
+    int m_volatility_lookback_periods;
+    
+    // Параметры SessionGuard
+    bool m_is_london_session_enabled;
+    bool m_is_new_york_session_enabled;
+    bool m_is_tokyo_session_enabled;
+    int m_london_start_hour;
+    int m_london_end_hour;
+    int m_new_york_start_hour;
+    int m_new_york_end_hour;
+    int m_tokyo_start_hour;
+    int m_tokyo_end_hour;
+    
+    // Параметры SlippageGuard
     double m_max_slippage_pips;
     
     // --- СОСТОЯНИЕ КЛАССА ---
-    CNewsManager* m_news_manager; // Менеджер новостей
-    int           m_h_atr_m15;    // ATR для M15 (спред)
-    int           m_h_atr_h1;     // ATR для H1 (стоп-лосс)
+    NewsEvent m_news_events[];
+    int m_news_events_count;
+    datetime m_last_news_update;
+    
+    // Хэндлы индикаторов
+    int m_h_atr;
 
 public:
     // --- Публичные Методы ---
-    CExecGate();
-    ~CExecGate();
-    void Initialize(bool is_news_guard_enabled = true,
-                   int news_pre_mins = 30,
-                   int news_post_mins = 15,
-                   double spread_atr_multiplier = 0.5,
-                   double sl_atr_multiplier_trend = 2.0,
-                   double sl_atr_multiplier_flat = 1.5,
-                   int session_end_hour = 16,
-                   double min_atr_multiplier = 0.5,
-                   double max_atr_multiplier = 3.0,
-                   double max_slippage_pips = 3.0);
-    void OnTick();
-
-    // --- ГЛАВНАЯ ФУНКЦИЯ-ГВАРД ---
-    bool IsExecutionAllowed(const string symbol, int direction, string signal_bucket, string &reason);
     
-    // --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
-    double GetAsymmetricStopLossPips(const string symbol, E_MarketRegime current_regime);
-    bool IsFlattenRequired(const string symbol);
-    bool IsQuarantineActive(const string symbol, int direction);
+    /**
+     * @brief Конструктор фильтров исполнения
+     */
+    CExecGate();
+    
+    /**
+     * @brief Деструктор - освобождает ресурсы
+     */
+    ~CExecGate();
+    
+    /**
+     * @brief Инициализация системы фильтров исполнения
+     * @param is_news_guard_enabled Включить защиту от новостей
+     * @param is_spread_guard_enabled Включить защиту от спреда
+     * @param is_volatility_guard_enabled Включить защиту от волатильности
+     * @param is_session_guard_enabled Включить защиту по сессиям
+     * @param is_slippage_guard_enabled Включить защиту от проскальзывания
+     * @param news_block_minutes_before Блокировка до новостей (минуты)
+     * @param news_block_minutes_after Блокировка после новостей (минуты)
+     * @param high_impact_block_minutes Блокировка для высокого воздействия (минуты)
+     * @param medium_impact_block_minutes Блокировка для среднего воздействия (минуты)
+     * @param low_impact_block_minutes Блокировка для низкого воздействия (минуты)
+     * @param max_spread_pips Максимальный спред в пипсах
+     * @param atr_multiplier_for_spread Множитель ATR для динамического спреда
+     * @param max_volatility_percent Максимальная волатильность в %
+     * @param volatility_lookback_periods Период для расчета волатильности
+     * @param is_london_session_enabled Включить Лондонскую сессию
+     * @param is_new_york_session_enabled Включить Нью-Йоркскую сессию
+     * @param is_tokyo_session_enabled Включить Токийскую сессию
+     * @param london_start_hour Начало Лондонской сессии (час)
+     * @param london_end_hour Конец Лондонской сессии (час)
+     * @param new_york_start_hour Начало Нью-Йоркской сессии (час)
+     * @param new_york_end_hour Конец Нью-Йоркской сессии (час)
+     * @param tokyo_start_hour Начало Токийской сессии (час)
+     * @param tokyo_end_hour Конец Токийской сессии (час)
+     * @param max_slippage_pips Максимальное проскальзывание в пипсах
+     */
+    void Initialize(bool is_news_guard_enabled = true,
+                   bool is_spread_guard_enabled = true,
+                   bool is_volatility_guard_enabled = true,
+                   bool is_session_guard_enabled = true,
+                   bool is_slippage_guard_enabled = true,
+                   int news_block_minutes_before = 30,
+                   int news_block_minutes_after = 15,
+                   int high_impact_block_minutes = 60,
+                   int medium_impact_block_minutes = 30,
+                   int low_impact_block_minutes = 15,
+                   double max_spread_pips = 3.0,
+                   double atr_multiplier_for_spread = 2.0,
+                   double max_volatility_percent = 5.0,
+                   int volatility_lookback_periods = 20,
+                   bool is_london_session_enabled = true,
+                   bool is_new_york_session_enabled = true,
+                   bool is_tokyo_session_enabled = false,
+                   int london_start_hour = 8,
+                   int london_end_hour = 17,
+                   int new_york_start_hour = 13,
+                   int new_york_end_hour = 22,
+                   int tokyo_start_hour = 0,
+                   int tokyo_end_hour = 9,
+                   double max_slippage_pips = 2.0);
+    
+    /**
+     * @brief Обновление состояния на каждом тике
+     * @param current_regime Текущий режим рынка
+     */
+    void OnTick(E_MarketRegime current_regime);
+    
+    /**
+     * @brief Главная функция проверки разрешения исполнения
+     * @param symbol Торговый символ
+     * @param direction Направление сделки (1=BUY, -1=SELL)
+     * @param current_regime Текущий режим рынка
+     * @param reason Причина блокировки (выходной параметр)
+     * @return true если исполнение разрешено
+     */
+    bool IsExecutionAllowed(const string symbol, const int direction, E_MarketRegime current_regime, string &reason);
+    
+    /**
+     * @brief Получение асимметричного стоп-лосса в пипсах
+     * @param symbol Торговый символ
+     * @param direction Направление сделки (1=BUY, -1=SELL)
+     * @param current_regime Текущий режим рынка
+     * @return Размер стоп-лосса в пипсах
+     */
+    double GetAsymmetricStopLossPips(const string symbol, const int direction, E_MarketRegime current_regime);
+    
+    // --- Публичные методы-заглушки ---
+    
+    /**
+     * @brief Проверка необходимости закрытия позиций (заглушка)
+     * @param symbol Торговый символ
+     * @return false (заглушка)
+     */
+    bool IsFlattenRequired(const string symbol) { return false; }
+    
+    /**
+     * @brief Проверка карантина для символа (заглушка)
+     * @param symbol Торговый символ
+     * @param direction Направление сделки
+     * @return false (заглушка)
+     */
+    bool IsQuarantineActive(const string symbol, const int direction) { return false; }
 
 private:
     // --- Приватные Методы-Проверки ---
-    void LoadNewsFromCSV(const string filename);
+    
+    /**
+     * @brief Проверка новостных событий
+     * @param symbol Торговый символ
+     * @param reason Причина блокировки (выходной параметр)
+     * @return true если новости не блокируют торговлю
+     */
     bool IsNewsOK(const string symbol, string &reason);
-    bool IsSpreadOK(const string symbol, string &reason);
+    
+    /**
+     * @brief Проверка спреда
+     * @param symbol Торговый символ
+     * @param current_regime Текущий режим рынка
+     * @param reason Причина блокировки (выходной параметр)
+     * @return true если спред допустим
+     */
+    bool IsSpreadOK(const string symbol, E_MarketRegime current_regime, string &reason);
+    
+    /**
+     * @brief Проверка волатильности
+     * @param symbol Торговый символ
+     * @param reason Причина блокировки (выходной параметр)
+     * @return true если волатильность допустима
+     */
     bool IsVolatilityOK(const string symbol, string &reason);
-    bool IsSessionTimeOK(string signal_bucket, string &reason);
+    
+    /**
+     * @brief Проверка торговых сессий
+     * @param reason Причина блокировки (выходной параметр)
+     * @return true если текущая сессия разрешена
+     */
+    bool IsSessionOK(string &reason);
+    
+    /**
+     * @brief Проверка проскальзывания
+     * @param symbol Торговый символ
+     * @param reason Причина блокировки (выходной параметр)
+     * @return true если проскальзывание допустимо
+     */
+    bool IsSlippageOK(const string symbol, string &reason);
+    
+    // --- Вспомогательные методы ---
+    
+    /**
+     * @brief Загрузка новостей из CSV файла
+     * @param filename Имя файла с новостями
+     * @return true если загрузка успешна
+     */
+    bool LoadNewsFromCSV(const string filename);
+    
+    /**
+     * @brief Получение текущего ATR в пипсах
+     * @param symbol Торговый символ
+     * @param period Период ATR
+     * @return ATR в пипсах
+     */
+    double GetATRInPips(const string symbol, const int period = 14);
+    
+    /**
+     * @brief Получение текущего спреда в пипсах
+     * @param symbol Торговый символ
+     * @return Спред в пипсах
+     */
+    double GetSpreadInPips(const string symbol);
     
     /**
      * @brief Проверка родительского контроля (заглушка)
-     * @param reason Причина блокировки (выходной параметр)
-     * @return true если торговля разрешена
-     * 
-     * TODO: Implement full ParentalLock logic using OnTradeTransaction event.
-     * This should include checks for trading hours restrictions, maximum daily trades,
-     * account balance limits, and other protective measures.
+     * @return true (заглушка)
      */
-    bool IsParentalLockOK(string &reason);
-    
-    // Вспомогательные методы
-    double GetATRValue(int handle);
-    string ExtractBaseCurrency(const string symbol);
-    string ExtractQuoteCurrency(const string symbol);
-    double GetSpreadInPips(const string symbol);
-    int GetCurrentHour();
+    bool IsParentalLockOK() { return true; }
 };
 
 //+------------------------------------------------------------------+
-//| Конструктор                                                      |
+//| Конструктор фильтров исполнения                                  |
 //+------------------------------------------------------------------+
 CExecGate::CExecGate() {
     m_is_news_guard_enabled = true;
-    m_news_pre_mins = 30;
-    m_news_post_mins = 15;
-    m_spread_atr_multiplier = 0.5;
-    m_sl_atr_multiplier_trend = 2.0;
-    m_sl_atr_multiplier_flat = 1.5;
-    m_session_end_hour = 16;
-    m_min_atr_multiplier = 0.5;
-    m_max_atr_multiplier = 3.0;
-    m_max_slippage_pips = 3.0;
+    m_is_spread_guard_enabled = true;
+    m_is_volatility_guard_enabled = true;
+    m_is_session_guard_enabled = true;
+    m_is_slippage_guard_enabled = true;
     
-    m_news_manager = new CNewsManager();
-    m_h_atr_m15 = INVALID_HANDLE;
-    m_h_atr_h1 = INVALID_HANDLE;
+    m_news_block_minutes_before = 30;
+    m_news_block_minutes_after = 15;
+    m_high_impact_block_minutes = 60;
+    m_medium_impact_block_minutes = 30;
+    m_low_impact_block_minutes = 15;
+    
+    m_max_spread_pips = 3.0;
+    m_atr_multiplier_for_spread = 2.0;
+    
+    m_max_volatility_percent = 5.0;
+    m_volatility_lookback_periods = 20;
+    
+    m_is_london_session_enabled = true;
+    m_is_new_york_session_enabled = true;
+    m_is_tokyo_session_enabled = false;
+    m_london_start_hour = 8;
+    m_london_end_hour = 17;
+    m_new_york_start_hour = 13;
+    m_new_york_end_hour = 22;
+    m_tokyo_start_hour = 0;
+    m_tokyo_end_hour = 9;
+    
+    m_max_slippage_pips = 2.0;
+    
+    m_news_events_count = 0;
+    m_last_news_update = 0;
+    m_h_atr = INVALID_HANDLE;
 }
 
 //+------------------------------------------------------------------+
-//| Деструктор                                                       |
+//| Деструктор фильтров исполнения                                   |
 //+------------------------------------------------------------------+
 CExecGate::~CExecGate() {
-    if(m_news_manager != NULL) {
-        delete m_news_manager;
-    }
-    
-    if(m_h_atr_m15 != INVALID_HANDLE) {
-        IndicatorRelease(m_h_atr_m15);
-    }
-    
-    if(m_h_atr_h1 != INVALID_HANDLE) {
-        IndicatorRelease(m_h_atr_h1);
+    if(m_h_atr != INVALID_HANDLE) {
+        IndicatorRelease(m_h_atr);
     }
 }
 
@@ -189,276 +316,177 @@ CExecGate::~CExecGate() {
 //| Инициализация                                                    |
 //+------------------------------------------------------------------+
 void CExecGate::Initialize(bool is_news_guard_enabled = true,
-                          int news_pre_mins = 30,
-                          int news_post_mins = 15,
-                          double spread_atr_multiplier = 0.5,
-                          double sl_atr_multiplier_trend = 2.0,
-                          double sl_atr_multiplier_flat = 1.5,
-                          int session_end_hour = 16,
-                          double min_atr_multiplier = 0.5,
-                          double max_atr_multiplier = 3.0,
-                          double max_slippage_pips = 3.0) {
+                          bool is_spread_guard_enabled = true,
+                          bool is_volatility_guard_enabled = true,
+                          bool is_session_guard_enabled = true,
+                          bool is_slippage_guard_enabled = true,
+                          int news_block_minutes_before = 30,
+                          int news_block_minutes_after = 15,
+                          int high_impact_block_minutes = 60,
+                          int medium_impact_block_minutes = 30,
+                          int low_impact_block_minutes = 15,
+                          double max_spread_pips = 3.0,
+                          double atr_multiplier_for_spread = 2.0,
+                          double max_volatility_percent = 5.0,
+                          int volatility_lookback_periods = 20,
+                          bool is_london_session_enabled = true,
+                          bool is_new_york_session_enabled = true,
+                          bool is_tokyo_session_enabled = false,
+                          int london_start_hour = 8,
+                          int london_end_hour = 17,
+                          int new_york_start_hour = 13,
+                          int new_york_end_hour = 22,
+                          int tokyo_start_hour = 0,
+                          int tokyo_end_hour = 9,
+                          double max_slippage_pips = 2.0) {
     
     m_is_news_guard_enabled = is_news_guard_enabled;
-    m_news_pre_mins = news_pre_mins;
-    m_news_post_mins = news_post_mins;
-    m_spread_atr_multiplier = spread_atr_multiplier;
-    m_sl_atr_multiplier_trend = sl_atr_multiplier_trend;
-    m_sl_atr_multiplier_flat = sl_atr_multiplier_flat;
-    m_session_end_hour = session_end_hour;
-    m_min_atr_multiplier = min_atr_multiplier;
-    m_max_atr_multiplier = max_atr_multiplier;
+    m_is_spread_guard_enabled = is_spread_guard_enabled;
+    m_is_volatility_guard_enabled = is_volatility_guard_enabled;
+    m_is_session_guard_enabled = is_session_guard_enabled;
+    m_is_slippage_guard_enabled = is_slippage_guard_enabled;
+    
+    m_news_block_minutes_before = news_block_minutes_before;
+    m_news_block_minutes_after = news_block_minutes_after;
+    m_high_impact_block_minutes = high_impact_block_minutes;
+    m_medium_impact_block_minutes = medium_impact_block_minutes;
+    m_low_impact_block_minutes = low_impact_block_minutes;
+    
+    m_max_spread_pips = max_spread_pips;
+    m_atr_multiplier_for_spread = atr_multiplier_for_spread;
+    
+    m_max_volatility_percent = max_volatility_percent;
+    m_volatility_lookback_periods = volatility_lookback_periods;
+    
+    m_is_london_session_enabled = is_london_session_enabled;
+    m_is_new_york_session_enabled = is_new_york_session_enabled;
+    m_is_tokyo_session_enabled = is_tokyo_session_enabled;
+    m_london_start_hour = london_start_hour;
+    m_london_end_hour = london_end_hour;
+    m_new_york_start_hour = new_york_start_hour;
+    m_new_york_end_hour = new_york_end_hour;
+    m_tokyo_start_hour = tokyo_start_hour;
+    m_tokyo_end_hour = tokyo_end_hour;
+    
     m_max_slippage_pips = max_slippage_pips;
     
-    // Создаем хэндлы ATR
-    m_h_atr_m15 = iATR(_Symbol, PERIOD_M15, 14);
-    m_h_atr_h1 = iATR(_Symbol, PERIOD_H1, 14);
-    
-    if(m_h_atr_m15 == INVALID_HANDLE) {
-        Print("ExecGate ERROR: Failed to create ATR M15 handle");
-    }
-    
-    if(m_h_atr_h1 == INVALID_HANDLE) {
-        Print("ExecGate ERROR: Failed to create ATR H1 handle");
-    }
+    // Инициализируем индикаторы
+    m_h_atr = iATR(_Symbol, PERIOD_H1, 14);
     
     // Загружаем новости
     LoadNewsFromCSV("news_calendar.csv");
     
-    Print("ExecGate: Initialized with news guard = ", m_is_news_guard_enabled);
+    Print("ExecGate: Initialized with NewsGuard=", m_is_news_guard_enabled, 
+          ", SpreadGuard=", m_is_spread_guard_enabled,
+          ", VolatilityGuard=", m_is_volatility_guard_enabled);
 }
 
 //+------------------------------------------------------------------+
 //| Обновление на каждом тике                                        |
 //+------------------------------------------------------------------+
-void CExecGate::OnTick() {
-    // Здесь можно добавить периодические проверки, например, обновление новостей
+void CExecGate::OnTick(E_MarketRegime current_regime) {
+    // Обновляем новости каждый час
+    datetime current_time = TimeCurrent();
+    if(current_time - m_last_news_update > 3600) {
+        LoadNewsFromCSV("news_calendar.csv");
+        m_last_news_update = current_time;
+    }
 }
 
 //+------------------------------------------------------------------+
-//| Главная функция проверки возможности исполнения                   |
+//| Главная функция проверки разрешения исполнения                  |
 //+------------------------------------------------------------------+
-/**
- * @brief Главная функция проверки возможности исполнения сделки
- * @param symbol Торговый символ
- * @param direction Направление сделки
- * @param signal_bucket Категория сигнала
- * @param reason Причина блокировки (выходной параметр)
- * @return true если исполнение разрешено
- */
-bool CExecGate::IsExecutionAllowed(const string symbol, int direction, string signal_bucket, string &reason) {
-    // Последовательно вызываем все проверки
-    
-    // 1. Проверка родительского контроля
-    if(!IsParentalLockOK(reason)) {
+bool CExecGate::IsExecutionAllowed(const string symbol, const int direction, E_MarketRegime current_regime, string &reason) {
+    // 1. Проверка новостей
+    if(m_is_news_guard_enabled && !IsNewsOK(symbol, reason)) {
         return false;
     }
     
-    // 2. Проверка новостей
-    if(!IsNewsOK(symbol, reason)) {
+    // 2. Проверка спреда
+    if(m_is_spread_guard_enabled && !IsSpreadOK(symbol, current_regime, reason)) {
         return false;
     }
     
-    // 3. Проверка спреда
-    if(!IsSpreadOK(symbol, reason)) {
+    // 3. Проверка волатильности
+    if(m_is_volatility_guard_enabled && !IsVolatilityOK(symbol, reason)) {
         return false;
     }
     
-    // 4. Проверка волатильности
-    if(!IsVolatilityOK(symbol, reason)) {
+    // 4. Проверка сессий
+    if(m_is_session_guard_enabled && !IsSessionOK(reason)) {
         return false;
     }
     
-    // 5. Проверка времени сессии
-    if(!IsSessionTimeOK(signal_bucket, reason)) {
+    // 5. Проверка проскальзывания
+    if(m_is_slippage_guard_enabled && !IsSlippageOK(symbol, reason)) {
         return false;
     }
     
-    reason = "All execution filters passed";
-    return true;
+    return true; // Все проверки пройдены
 }
 
 //+------------------------------------------------------------------+
-//| Расчет асимметричного стоп-лосса                                  |
+//| Получение асимметричного стоп-лосса                             |
 //+------------------------------------------------------------------+
-double CExecGate::GetAsymmetricStopLossPips(const string symbol, E_MarketRegime current_regime) {
-    double atr_value = GetATRValue(m_h_atr_h1);
-    if(atr_value <= 0) return 50.0; // Значение по умолчанию
+double CExecGate::GetAsymmetricStopLossPips(const string symbol, const int direction, E_MarketRegime current_regime) {
+    double atr_pips = GetATRInPips(symbol, 14);
     
-    // Конвертируем ATR в пипсы
-    double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
-    int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
-    double pip_size = (digits == 3 || digits == 5) ? point * 10.0 : point;
-    double atr_pips = atr_value / pip_size;
-    
-    // Выбираем множитель в зависимости от режима
-    double multiplier = 2.0; // По умолчанию
-    
+    // Асимметричные стоп-лоссы в зависимости от режима
     switch(current_regime) {
         case REGIME_TREND_YOUNG:
         case REGIME_TREND_MATURE:
-            multiplier = m_sl_atr_multiplier_trend;
-            break;
-            
-        case REGIME_TREND_WEAKENING:
-            multiplier = m_sl_atr_multiplier_trend * 0.8; // Меньший стоп при ослабевающем тренде
-            break;
+            return atr_pips * 1.5; // Более широкие стопы в тренде
             
         case REGIME_FLAT_QUIET:
+            return atr_pips * 1.0; // Стандартные стопы во флэте
+            
         case REGIME_FLAT_CHOPPY:
-            multiplier = m_sl_atr_multiplier_flat;
-            break;
+            return atr_pips * 0.8; // Более узкие стопы в "пиле"
             
-        case REGIME_UNSTABLE:
-            multiplier = m_sl_atr_multiplier_flat * 0.7; // Очень тайтовый стоп в нестабильности
-            break;
-            
-        case REGIME_RISK_OFF:
-            multiplier = m_sl_atr_multiplier_trend * 1.5; // Широкий стоп в панике
-            break;
+        case REGIME_TREND_WEAKENING:
+            return atr_pips * 1.2; // Умеренные стопы при ослаблении тренда
             
         default:
-            multiplier = 2.0;
-            break;
+            return atr_pips * 1.0; // Стандартные стопы
     }
-    
-    double sl_pips = atr_pips * multiplier;
-    
-    // Ограничиваем разумными пределами
-    sl_pips = MathMax(10.0, MathMin(200.0, sl_pips));
-    
-    return sl_pips;
 }
 
 //+------------------------------------------------------------------+
-//| Проверка необходимости закрытия позиций                          |
-//+------------------------------------------------------------------+
-bool CExecGate::IsFlattenRequired(const string symbol) {
-    if(!m_is_news_guard_enabled) return false;
-    
-    string base_currency = ExtractBaseCurrency(symbol);
-    string quote_currency = ExtractQuoteCurrency(symbol);
-    
-    datetime current_time = TimeCurrent();
-    
-    for(int i = 0; i < m_news_manager.Total(); i++) {
-        NewsEvent* event = m_news_manager.At(i);
-        if(event == NULL) continue;
-        
-        // Проверяем только супер-события
-        if(!event.is_flatten_event) continue;
-        
-        // Проверяем валюты
-        if(event.currency != base_currency && event.currency != quote_currency) continue;
-        
-        // Проверяем время - за 15 минут до события
-        if(current_time >= event.time - 15*60 && current_time <= event.time + 5*60) {
-            Print("ExecGate: Flatten required for ", symbol, " due to ", event.event_name);
-            return true;
-        }
-    }
-    
-    return false;
-}
-
-//+------------------------------------------------------------------+
-//| Проверка пост-новостного карантина                               |
-//+------------------------------------------------------------------+
-bool CExecGate::IsQuarantineActive(const string symbol, int direction) {
-    if(!m_is_news_guard_enabled) return false;
-    
-    string base_currency = ExtractBaseCurrency(symbol);
-    string quote_currency = ExtractQuoteCurrency(symbol);
-    
-    datetime current_time = TimeCurrent();
-    
-    for(int i = 0; i < m_news_manager.Total(); i++) {
-        NewsEvent* event = m_news_manager.At(i);
-        if(event == NULL) continue;
-        
-        // Проверяем валюты
-        if(event.currency != base_currency && event.currency != quote_currency) continue;
-        
-        // Проверяем время - карантин на 30 минут после важных событий
-        if(event.importance >= 2 && 
-           current_time >= event.time && 
-           current_time <= event.time + 30*60) {
-            return true;
-        }
-    }
-    
-    return false;
-}
-
-//+------------------------------------------------------------------+
-//| Загрузка новостей из CSV файла                                   |
-//+------------------------------------------------------------------+
-void CExecGate::LoadNewsFromCSV(const string filename) {
-    m_news_manager.Clear();
-    
-    int handle = FileOpen(filename, FILE_READ|FILE_CSV|FILE_ANSI, ',');
-    if(handle == INVALID_HANDLE) {
-        Print("ExecGate: News file ", filename, " not found in MQL5/Files/");
-        return;
-    }
-    
-    // Пропускаем заголовок
-    if(!FileIsEnding(handle)) {
-        string header = FileReadString(handle);
-    }
-    
-    int events_loaded = 0;
-    while(!FileIsEnding(handle)) {
-        string date_str = FileReadString(handle);
-        if(date_str == "") break;
-        
-        string currency = FileReadString(handle);
-        string importance_str = FileReadString(handle);
-        string event_name = FileReadString(handle);
-        
-        // Парсим дату и время
-        datetime event_time = StringToTime(date_str);
-        if(event_time == 0) continue;
-        
-        int importance = (int)StringToInteger(importance_str);
-        if(importance < 1) importance = 1;
-        if(importance > 3) importance = 3;
-        
-        m_news_manager.AddEvent(event_time, currency, importance, event_name);
-        events_loaded++;
-    }
-    
-    FileClose(handle);
-    Print("ExecGate: Loaded ", events_loaded, " news events from ", filename);
-}
-
-//+------------------------------------------------------------------+
-//| Проверка новостей                                                |
+//| Проверка новостных событий                                       |
 //+------------------------------------------------------------------+
 bool CExecGate::IsNewsOK(const string symbol, string &reason) {
-    if(!m_is_news_guard_enabled) return true;
-    
-    string base_currency = ExtractBaseCurrency(symbol);
-    string quote_currency = ExtractQuoteCurrency(symbol);
-    
     datetime current_time = TimeCurrent();
+    string base_currency = StringSubstr(symbol, 0, 3);
+    string quote_currency = StringSubstr(symbol, 3, 3);
     
-    for(int i = 0; i < m_news_manager.Total(); i++) {
-        NewsEvent* event = m_news_manager.At(i);
-        if(event == NULL) continue;
+    for(int i = 0; i < m_news_events_count; i++) {
+        NewsEvent &news = m_news_events[i];
         
-        // Проверяем валюты
-        if(event.currency != base_currency && event.currency != quote_currency) continue;
+        // Проверяем, касается ли новость нашего символа
+        if(news.currency != base_currency && news.currency != quote_currency) {
+            continue;
+        }
         
         // Проверяем временной интервал
-        datetime start_time = event.time - m_news_pre_mins * 60;
-        datetime end_time = event.time + m_news_post_mins * 60;
+        datetime block_start = news.start_time - m_news_block_minutes_before * 60;
+        datetime block_end = news.end_time + m_news_block_minutes_after * 60;
         
-        if(current_time >= start_time && current_time <= end_time) {
-            reason = StringFormat("News guard: %s %s in %d minutes", 
-                                event.currency, event.event_name, 
-                                (int)((event.time - current_time) / 60));
-            return false;
+        if(current_time >= block_start && current_time <= block_end) {
+            // Дополнительная блокировка в зависимости от воздействия
+            int additional_minutes = 0;
+            switch(news.impact) {
+                case 2: additional_minutes = m_high_impact_block_minutes; break;
+                case 1: additional_minutes = m_medium_impact_block_minutes; break;
+                case 0: additional_minutes = m_low_impact_block_minutes; break;
+            }
+            
+            block_end += additional_minutes * 60;
+            
+            if(current_time <= block_end) {
+                reason = StringFormat("News block: %s (%s) until %s", 
+                                    news.title, news.currency, TimeToString(block_end));
+                return false;
+            }
         }
     }
     
@@ -468,30 +496,18 @@ bool CExecGate::IsNewsOK(const string symbol, string &reason) {
 //+------------------------------------------------------------------+
 //| Проверка спреда                                                  |
 //+------------------------------------------------------------------+
-bool CExecGate::IsSpreadOK(const string symbol, string &reason) {
-    double current_spread_pips = GetSpreadInPips(symbol);
-    double atr_value = GetATRValue(m_h_atr_m15);
+bool CExecGate::IsSpreadOK(const string symbol, E_MarketRegime current_regime, string &reason) {
+    double current_spread = GetSpreadInPips(symbol);
+    double max_allowed_spread = m_max_spread_pips;
     
-    if(atr_value <= 0) {
-        // Если нет ATR, используем фиксированный лимит
-        if(current_spread_pips > 5.0) {
-            reason = StringFormat("Spread too high: %.1f pips > 5.0 pips (no ATR)", current_spread_pips);
-            return false;
-        }
-        return true;
+    // Динамический спред на основе ATR
+    if(current_regime == REGIME_FLAT_CHOPPY || current_regime == REGIME_UNSTABLE) {
+        double atr_pips = GetATRInPips(symbol, 14);
+        max_allowed_spread = MathMin(m_max_spread_pips, atr_pips * m_atr_multiplier_for_spread);
     }
     
-    // Конвертируем ATR в пипсы
-    double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
-    int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
-    double pip_size = (digits == 3 || digits == 5) ? point * 10.0 : point;
-    double atr_pips = atr_value / pip_size;
-    
-    double allowed_spread = atr_pips * m_spread_atr_multiplier;
-    
-    if(current_spread_pips > allowed_spread) {
-        reason = StringFormat("Spread too high: %.1f pips > %.1f pips (%.1f * %.2f ATR)", 
-                            current_spread_pips, allowed_spread, atr_pips, m_spread_atr_multiplier);
+    if(current_spread > max_allowed_spread) {
+        reason = StringFormat("Spread too high: %.1f pips > %.1f pips", current_spread, max_allowed_spread);
         return false;
     }
     
@@ -502,26 +518,12 @@ bool CExecGate::IsSpreadOK(const string symbol, string &reason) {
 //| Проверка волатильности                                           |
 //+------------------------------------------------------------------+
 bool CExecGate::IsVolatilityOK(const string symbol, string &reason) {
-    double atr_value = GetATRValue(m_h_atr_h1);
-    if(atr_value <= 0) return true; // Если нет данных, разрешаем
+    double atr_pips = GetATRInPips(symbol, 14);
+    double current_price = SymbolInfoDouble(symbol, SYMBOL_BID);
+    double volatility_percent = (atr_pips * SymbolInfoDouble(symbol, SYMBOL_POINT) * 100) / current_price;
     
-    // Конвертируем ATR в пипсы
-    double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
-    int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
-    double pip_size = (digits == 3 || digits == 5) ? point * 10.0 : point;
-    double atr_pips = atr_value / pip_size;
-    
-    // Проверяем минимальную волатильность
-    if(atr_pips < 20.0 * m_min_atr_multiplier) {
-        reason = StringFormat("Volatility too low: ATR %.1f pips < %.1f pips", 
-                            atr_pips, 20.0 * m_min_atr_multiplier);
-        return false;
-    }
-    
-    // Проверяем максимальную волатильность
-    if(atr_pips > 100.0 * m_max_atr_multiplier) {
-        reason = StringFormat("Volatility too high: ATR %.1f pips > %.1f pips", 
-                            atr_pips, 100.0 * m_max_atr_multiplier);
+    if(volatility_percent > m_max_volatility_percent) {
+        reason = StringFormat("Volatility too high: %.2f%% > %.2f%%", volatility_percent, m_max_volatility_percent);
         return false;
     }
     
@@ -529,87 +531,100 @@ bool CExecGate::IsVolatilityOK(const string symbol, string &reason) {
 }
 
 //+------------------------------------------------------------------+
-//| Проверка времени сессии                                          |
+//| Проверка торговых сессий                                         |
 //+------------------------------------------------------------------+
-bool CExecGate::IsSessionTimeOK(string signal_bucket, string &reason) {
-    // Проверяем только для сессионных стратегий
-    if(StringFind(signal_bucket, "Session") == -1 && 
-       StringFind(signal_bucket, "EU_") == -1 && 
-       StringFind(signal_bucket, "US_") == -1 && 
-       StringFind(signal_bucket, "ASIA_") == -1) {
-        return true; // Не сессионная стратегия
-    }
+bool CExecGate::IsSessionOK(string &reason) {
+    MqlDateTime dt;
+    TimeToStruct(TimeCurrent(), dt);
+    int current_hour = dt.hour;
     
-    int current_hour = GetCurrentHour();
+    bool is_london_active = m_is_london_session_enabled && 
+                           (current_hour >= m_london_start_hour && current_hour < m_london_end_hour);
+    bool is_new_york_active = m_is_new_york_session_enabled && 
+                             (current_hour >= m_new_york_start_hour && current_hour < m_new_york_end_hour);
+    bool is_tokyo_active = m_is_tokyo_session_enabled && 
+                          (current_hour >= m_tokyo_start_hour && current_hour < m_tokyo_end_hour);
     
-    if(current_hour >= m_session_end_hour) {
-        reason = StringFormat("Session ended: %02d:00 >= %02d:00", current_hour, m_session_end_hour);
+    if(!is_london_active && !is_new_york_active && !is_tokyo_active) {
+        reason = StringFormat("No active trading session. Current hour: %d", current_hour);
         return false;
     }
     
+    return true;
+}
+
+//+------------------------------------------------------------------+
+//| Проверка проскальзывания                                         |
+//+------------------------------------------------------------------+
+bool CExecGate::IsSlippageOK(const string symbol, string &reason) {
+    // Упрощенная проверка - в реальности нужно отслеживать фактические проскальзывания
+    double current_spread = GetSpreadInPips(symbol);
+    
+    if(current_spread > m_max_slippage_pips) {
+        reason = StringFormat("Potential slippage too high: spread %.1f pips > max %.1f pips", 
+                            current_spread, m_max_slippage_pips);
+        return false;
+    }
+    
+    return true;
+}
+
+//+------------------------------------------------------------------+
+//| Загрузка новостей из CSV файла                                   |
+//+------------------------------------------------------------------+
+bool CExecGate::LoadNewsFromCSV(const string filename) {
+    int file_handle = FileOpen(filename, FILE_READ|FILE_CSV);
+    if(file_handle == INVALID_HANDLE) {
+        Print("ExecGate: Cannot open news file: ", filename);
+        return false;
+    }
+    
+    m_news_events_count = 0;
+    ArrayResize(m_news_events, 100); // Предварительное выделение памяти
+    
+    while(!FileIsEnding(file_handle)) {
+        string line = FileReadString(file_handle);
+        if(StringLen(line) == 0) continue;
+        
+        // Парсим CSV строку: start_time,end_time,currency,title,impact
+        string parts[];
+        int parts_count = StringSplit(line, ',', parts);
+        if(parts_count < 5) continue;
+        
+        datetime start_time = StringToTime(parts[0]);
+        datetime end_time = StringToTime(parts[1]);
+        string currency = parts[2];
+        string title = parts[3];
+        int impact = (int)StringToInteger(parts[4]);
+        
+        if(start_time > 0 && end_time > 0) {
+            m_news_events[m_news_events_count] = NewsEvent(start_time, end_time, currency, title, impact);
+            m_news_events_count++;
+        }
+    }
+    
+    FileClose(file_handle);
+    Print("ExecGate: Loaded ", m_news_events_count, " news events from ", filename);
     return true;
 }
 
 //+------------------------------------------------------------------+
 //| Вспомогательные методы                                           |
 //+------------------------------------------------------------------+
-double CExecGate::GetATRValue(int handle) {
-    if(handle == INVALID_HANDLE) return 0.0;
+double CExecGate::GetATRInPips(const string symbol, const int period = 14) {
+    if(m_h_atr == INVALID_HANDLE) return 0.0;
     
-    double buffer[];
-    if(CopyBuffer(handle, 0, 1, 1, buffer) <= 0) {
-        return 0.0;
-    }
-    return buffer[0];
-}
-
-string CExecGate::ExtractBaseCurrency(const string symbol) {
-    if(StringLen(symbol) >= 3) {
-        return StringSubstr(symbol, 0, 3);
-    }
-    return "";
-}
-
-string CExecGate::ExtractQuoteCurrency(const string symbol) {
-    if(StringLen(symbol) >= 6) {
-        return StringSubstr(symbol, 3, 3);
-    }
-    return "";
+    double atr_buffer[];
+    if(CopyBuffer(m_h_atr, 0, 1, 1, atr_buffer) <= 0) return 0.0;
+    
+    double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
+    return atr_buffer[0] / point;
 }
 
 double CExecGate::GetSpreadInPips(const string symbol) {
-    long spread_points = SymbolInfoInteger(symbol, SYMBOL_SPREAD);
+    double ask = SymbolInfoDouble(symbol, SYMBOL_ASK);
+    double bid = SymbolInfoDouble(symbol, SYMBOL_BID);
     double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
-    int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
-    double pip_size = (digits == 3 || digits == 5) ? point * 10.0 : point;
     
-    return (double)spread_points * point / pip_size;
-}
-
-int CExecGate::GetCurrentHour() {
-    MqlDateTime dt;
-    TimeToStruct(TimeCurrent(), dt);
-    return dt.hour;
-}
-
-//+------------------------------------------------------------------+
-//| Проверка родительского контроля (заглушка)                       |
-//+------------------------------------------------------------------+
-/**
- * @brief Проверка ограничений родительского контроля
- * @param reason Причина блокировки (выходной параметр)
- * @return true если торговля разрешена
- */
-bool CExecGate::IsParentalLockOK(string &reason) {
-    // TODO: Implement full ParentalLock logic using OnTradeTransaction event
-    // Possible features to implement:
-    // - Trading hours restrictions (e.g., only 9:00-17:00)
-    // - Maximum daily trades limit
-    // - Maximum daily loss limit
-    // - Account balance protection
-    // - Instrument restrictions (e.g., only major pairs)
-    // - Leverage limitations
-    
-    // Заглушка - всегда разрешаем торговлю
-    return true;
+    return (ask - bid) / point;
 }

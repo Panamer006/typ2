@@ -47,54 +47,6 @@ public:
 };
 
 /**
- * @brief Менеджер состояний символов для Risk Manager
- * 
- * TODO: Optimize symbol state storage using a hash map for O(1) access
- * instead of current O(n) linear search. Consider using CHashMap if available
- * or implement custom hash table for "symbol" -> "CSymbolState*" mapping.
- */
-class CSymbolStateManager : public CObject {
-private:
-    CArrayObj* m_states; // Временное решение с линейным поиском O(n)
-    
-public:
-    /**
-     * @brief Конструктор менеджера состояний символов
-     */
-    CSymbolStateManager() {
-        m_states = new CArrayObj();
-    }
-    
-    /**
-     * @brief Деструктор - освобождает память массива состояний
-     */
-    ~CSymbolStateManager() {
-        if(m_states != NULL) {
-            delete m_states;
-        }
-    }
-    
-    /**
-     * @brief Получение состояния символа (создает новое если не найдено)
-     * @param symbol Торговый символ
-     * @return Указатель на состояние символа
-     */
-    CSymbolState* GetState(const string symbol) {
-        for(int i = 0; i < m_states.Total(); i++) {
-            CSymbolState* state = (CSymbolState*)m_states.At(i);
-            if(state != NULL && state.symbol == symbol) {
-                return state;
-            }
-        }
-        
-        // Создаем новое состояние если не найдено
-        CSymbolState* newState = new CSymbolState(symbol);
-        m_states.Add(newState);
-        return newState;
-    }
-};
-
-/**
  * @brief Центральная система управления рисками портфеля
  * 
  * Обеспечивает многоуровневую защиту капитала через контроль дневной просадки,
@@ -123,7 +75,7 @@ private:
     datetime m_current_day_start_time;
     bool     m_is_trading_blocked_by_dd;
     double   m_loss_for_recovery;
-    CArrayObj* m_symbol_states_map; 
+    CArrayObj* m_symbol_states_map;
 
 public:
     // --- Публичные Методы ---
@@ -166,7 +118,7 @@ public:
                    int sl_cluster_limit = 3,
                    int sl_cluster_timespan_hours = 4,
                    bool is_eow_protocol_enabled = true,
-                   DayOfWeek eow_day = FRIDAY,
+                   ENUM_DAY_OF_WEEK eow_day = FRIDAY,
                    int eow_hour = 15,
                    bool is_recovery_protocol_enabled = true);
     
@@ -354,7 +306,7 @@ void CRiskManager::Initialize(double max_daily_dd_percent = 2.0,
                              int sl_cluster_limit = 3,
                              int sl_cluster_timespan_hours = 4,
                              bool is_eow_protocol_enabled = true,
-                             DayOfWeek eow_day = FRIDAY,
+                             ENUM_DAY_OF_WEEK eow_day = FRIDAY,
                              int eow_hour = 15,
                              bool is_recovery_protocol_enabled = true) {
     
