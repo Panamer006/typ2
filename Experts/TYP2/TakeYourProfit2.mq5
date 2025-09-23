@@ -3,6 +3,23 @@
 #property description "Take Your Profit 2.0 - Clean Build v2.1.0"
 #property version   "2.1.0"
 
+// --- Inputs для Risk Manager ---
+input group "Risk Manager Settings"
+input double inp_max_daily_dd_percent = 2.0;                    // Максимальная дневная просадка в %
+input bool inp_is_gradual_dd_reduction_enabled = true;          // Включить пошаговое снижение риска
+input int inp_max_positions_per_currency = 3;                   // Максимум позиций на валюту
+input int inp_max_total_open_orders = 10;                       // Максимум открытых ордеров
+input double inp_max_total_open_lots = 5.0;                     // Максимум открытых лотов
+input double inp_max_total_risk_percent = 10.0;                 // Максимальный суммарный риск в %
+input int inp_cooldown_seconds_win = 300;                       // Кулдаун после прибыльной сделки (сек)
+input int inp_cooldown_seconds_loss = 600;                      // Кулдаун после убыточной сделки (сек)
+input int inp_sl_cluster_limit = 3;                             // Лимит кластера стоп-лоссов
+input int inp_sl_cluster_timespan_hours = 4;                    // Период кластера в часах
+input bool inp_is_eow_protocol_enabled = true;                  // Включить протокол конца недели
+input ENUM_DAY_OF_WEEK inp_eow_day = FRIDAY;                    // День недели для остановки торговли
+input int inp_eow_hour = 15;                                    // Час остановки торговли
+input bool inp_is_recovery_protocol_enabled = true;             // Включить протокол восстановления
+
 #include <Trade/Trade.mqh>
 CTrade trade;
 
@@ -55,20 +72,20 @@ int OnInit()
   
   // --- Инициализация системы управления рисками ---
   g_RiskManager.Initialize(
-    2.0,    // max_daily_dd_percent
-    true,   // is_gradual_dd_reduction_enabled
-    3,      // max_positions_per_currency
-    10,     // max_total_open_orders
-    5.0,    // max_total_open_lots
-    10.0,   // max_total_risk_percent
-    300,    // cooldown_seconds_win
-    600,    // cooldown_seconds_loss
-    3,      // sl_cluster_limit
-    4,      // sl_cluster_timespan_hours
-    true,   // is_eow_protocol_enabled
-    FRIDAY, // eow_day
-    15,     // eow_hour
-    true    // is_recovery_protocol_enabled
+    inp_max_daily_dd_percent,                    // max_daily_dd_percent
+    inp_is_gradual_dd_reduction_enabled,         // is_gradual_dd_reduction_enabled
+    inp_max_positions_per_currency,              // max_positions_per_currency
+    inp_max_total_open_orders,                   // max_total_open_orders
+    inp_max_total_open_lots,                     // max_total_open_lots
+    inp_max_total_risk_percent,                  // max_total_risk_percent
+    inp_cooldown_seconds_win,                    // cooldown_seconds_win
+    inp_cooldown_seconds_loss,                   // cooldown_seconds_loss
+    inp_sl_cluster_limit,                        // sl_cluster_limit
+    inp_sl_cluster_timespan_hours,               // sl_cluster_timespan_hours
+    inp_is_eow_protocol_enabled,                 // is_eow_protocol_enabled
+    inp_eow_day,                                 // eow_day
+    inp_eow_hour,                                // eow_hour
+    inp_is_recovery_protocol_enabled             // is_recovery_protocol_enabled
   );
   Print("Risk Manager: Initialized");
   
