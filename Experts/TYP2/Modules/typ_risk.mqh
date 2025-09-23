@@ -6,15 +6,19 @@
 #include "typ_regime_engine.mqh" // Подключаем Движок Режимов
 #include <Arrays/ArrayObj.mqh>
 
-// --- Структура для отслеживания состояния по каждому символу ---
-struct SymbolState {
+// --- Класс для отслеживания состояния по каждому символу ---
+class CSymbolState : public CObject {
+public:
     string   symbol;
     datetime last_close_time; // Для Cooldown
     double   last_close_profit; // Для адаптивного Cooldown
     int      sl_cluster_count; // Для защиты от частых стопов
     datetime sl_cluster_start_time;
     
-    SymbolState() {
+    /**
+     * @brief Конструктор по умолчанию
+     */
+    CSymbolState() {
         symbol = "";
         last_close_time = 0;
         last_close_profit = 0.0;
@@ -22,12 +26,23 @@ struct SymbolState {
         sl_cluster_start_time = 0;
     }
     
-    SymbolState(string sym) {
+    /**
+     * @brief Конструктор с символом
+     * @param sym Торговый символ
+     */
+    CSymbolState(string sym) {
         symbol = sym;
         last_close_time = 0;
         last_close_profit = 0.0;
         sl_cluster_count = 0;
         sl_cluster_start_time = 0;
+    }
+    
+    /**
+     * @brief Деструктор
+     */
+    ~CSymbolState() {
+        // Освобождение ресурсов если необходимо
     }
 };
 
@@ -36,7 +51,7 @@ struct SymbolState {
  * 
  * TODO: Optimize symbol state storage using a hash map for O(1) access
  * instead of current O(n) linear search. Consider using CHashMap if available
- * or implement custom hash table for "symbol" -> "SymbolState*" mapping.
+ * or implement custom hash table for "symbol" -> "CSymbolState*" mapping.
  */
 class CSymbolStateManager : public CObject {
 private:
@@ -64,16 +79,16 @@ public:
      * @param symbol Торговый символ
      * @return Указатель на состояние символа
      */
-    SymbolState* GetState(const string symbol) {
+    CSymbolState* GetState(const string symbol) {
         for(int i = 0; i < m_states.Total(); i++) {
-            SymbolState* state = (SymbolState*)m_states.At(i);
+            CSymbolState* state = (CSymbolState*)m_states.At(i);
             if(state != NULL && state.symbol == symbol) {
                 return state;
             }
         }
         
         // Создаем новое состояние если не найдено
-        SymbolState* newState = new SymbolState(symbol);
+        CSymbolState* newState = new CSymbolState(symbol);
         m_states.Add(newState);
         return newState;
     }
@@ -87,26 +102,20 @@ public:
  */
 class CRiskManager {
 private:
-    // --- ПАРАМЕТРЫ (будут инициализироваться из input-переменных) ---
-    // EquityGuard & DailyDDCap
+    // --- ПАРАМЕТРЫ ---
     double m_max_daily_dd_percent;
     bool   m_is_gradual_dd_reduction_enabled;
-    // Exposure
     int    m_max_positions_per_currency;
     int    m_max_total_open_orders;
     double m_max_total_open_lots;
     double m_max_total_risk_percent;
-    // Cooldown
     int    m_cooldown_seconds_win;
     int    m_cooldown_seconds_loss;
-    // SL Clustering
     int    m_sl_cluster_limit;
     int    m_sl_cluster_timespan_hours;
-    // EOW Protocol
     bool   m_is_eow_protocol_enabled;
-    DayOfWeek m_eow_day;
+    ENUM_DAY_OF_WEEK m_eow_day;
     int    m_eow_hour;
-    // Recovery Protocol
     bool   m_is_recovery_protocol_enabled;
 
     // --- СОСТОЯНИЕ КЛАССА ---
@@ -114,8 +123,7 @@ private:
     datetime m_current_day_start_time;
     bool     m_is_trading_blocked_by_dd;
     double   m_loss_for_recovery;
-    // Динамический массив для хранения состояния по каждому символу
-    CSymbolStateManager* m_symbol_states_manager; 
+    CArrayObj* m_symbol_states_map; 
 
 public:
     // --- Публичные Методы ---
@@ -281,6 +289,13 @@ private:
      * @return Количество позиций
      */
     int CountPositionsByCurrency(const string currency);
+    
+    /**
+     * @brief Получение состояния символа (создает новое если не найдено)
+     * @param symbol Торговый символ
+     * @return Указатель на состояние символа
+     */
+    CSymbolState* GetSymbolState(const string symbol);
 };
 
 //+------------------------------------------------------------------+
@@ -310,7 +325,7 @@ CRiskManager::CRiskManager() {
     m_is_trading_blocked_by_dd = false;
     m_loss_for_recovery = 0.0;
     
-    m_symbol_states_manager = new CSymbolStateManager();
+    m_symbol_states_map = new CArrayObj();
 }
 
 //+------------------------------------------------------------------+
@@ -320,8 +335,8 @@ CRiskManager::CRiskManager() {
  * @brief Деструктор - освобождает динамически выделенную память
  */
 CRiskManager::~CRiskManager() {
-    if(m_symbol_states_manager != NULL) {
-        delete m_symbol_states_manager;
+    if(m_symbol_states_map != NULL) {
+        delete m_symbol_states_map;
     }
 }
 
@@ -386,7 +401,7 @@ void CRiskManager::OnTick(E_MarketRegime current_regime) {
 //| Уведомление о закрытии сделки                                     |
 //+------------------------------------------------------------------+
 void CRiskManager::OnTradeClose(const string symbol, const double profit) {
-    SymbolState* state = m_symbol_states_manager.GetState(symbol);
+    CSymbolState* state = GetSymbolState(symbol);
     if(state == NULL) return;
     
     state.last_close_time = TimeCurrent();
@@ -557,7 +572,7 @@ bool CRiskManager::IsTotalExposureOK(const double new_trade_risk_percent, double
 //| Проверка кулдауна                                                |
 //+------------------------------------------------------------------+
 bool CRiskManager::IsCooldownOK(const string symbol, string &reason) {
-    SymbolState* state = m_symbol_states_manager.GetState(symbol);
+    CSymbolState* state = GetSymbolState(symbol);
     if(state == NULL) return true;
     
     if(state.last_close_time == 0) return true; // Никогда не торговали этим символом
@@ -578,7 +593,7 @@ bool CRiskManager::IsCooldownOK(const string symbol, string &reason) {
 //| Проверка кластера стопов                                         |
 //+------------------------------------------------------------------+
 bool CRiskManager::IsStopLossClusterOK(const string symbol, string &reason) {
-    SymbolState* state = m_symbol_states_manager.GetState(symbol);
+    CSymbolState* state = GetSymbolState(symbol);
     if(state == NULL) return true;
     
     // Сбрасываем кластер если прошло достаточно времени
@@ -607,7 +622,7 @@ bool CRiskManager::IsEOWProtocolActive(string &reason) {
     
     if(dt.day_of_week >= m_eow_day && dt.hour >= m_eow_hour) {
         reason = StringFormat("EOW Protocol active. Current: %s %02d:00, Limit: %s %02d:00", 
-                            EnumToString((DayOfWeek)dt.day_of_week), dt.hour,
+                            EnumToString((ENUM_DAY_OF_WEEK)dt.day_of_week), dt.hour,
                             EnumToString(m_eow_day), m_eow_hour);
         return false;
     }
@@ -680,4 +695,19 @@ int CRiskManager::CountPositionsByCurrency(const string currency) {
         }
     }
     return count;
+}
+
+CSymbolState* CRiskManager::GetSymbolState(const string symbol) {
+    // Ищем существующее состояние
+    for(int i = 0; i < m_symbol_states_map.Total(); i++) {
+        CSymbolState* state = (CSymbolState*)m_symbol_states_map.At(i);
+        if(state != NULL && state.symbol == symbol) {
+            return state;
+        }
+    }
+    
+    // Создаем новое состояние если не найдено
+    CSymbolState* newState = new CSymbolState(symbol);
+    m_symbol_states_map.Add(newState);
+    return newState;
 }

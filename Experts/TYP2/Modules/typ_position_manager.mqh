@@ -10,8 +10,9 @@
 #include <Arrays/ArrayObj.mqh>
 #include <Trade/Trade.mqh>
 
-// --- Структура для хранения состояния каждой управляемой позиции ---
-struct ManagedPosition {
+// --- Класс для хранения состояния каждой управляемой позиции ---
+class CManagedPosition : public CObject {
+public:
     ulong    ticket;
     string   symbol;
     int      signal_category; // 0-Конфлюэнс, 1-Королевский
@@ -29,7 +30,10 @@ struct ManagedPosition {
     datetime last_addon_time; // Время последней доливки
     double   signal_score; // Качество сигнала (0.0-1.0)
     
-    ManagedPosition() {
+    /**
+     * @brief Конструктор по умолчанию
+     */
+    CManagedPosition() {
         ticket = 0;
         symbol = "";
         signal_category = 0;
@@ -48,7 +52,14 @@ struct ManagedPosition {
         signal_score = 0.5;
     }
     
-    ManagedPosition(ulong pos_ticket, string pos_symbol, int category, double score = 0.5) {
+    /**
+     * @brief Конструктор с параметрами
+     * @param pos_ticket Номер тикета позиции
+     * @param pos_symbol Символ позиции
+     * @param category Категория сигнала
+     * @param score Качество сигнала
+     */
+    CManagedPosition(ulong pos_ticket, string pos_symbol, int category, double score = 0.5) {
         ticket = pos_ticket;
         symbol = pos_symbol;
         signal_category = category;
@@ -65,6 +76,13 @@ struct ManagedPosition {
         tp1_triggered = false;
         tp2_triggered = false;
         last_addon_time = 0;
+    }
+    
+    /**
+     * @brief Деструктор
+     */
+    ~CManagedPosition() {
+        // Освобождение ресурсов если необходимо
     }
 };
 
@@ -84,14 +102,14 @@ public:
         }
     }
     
-    void Add(ManagedPosition* pos) {
-        m_positions.Add(pos);
+    void Add(CManagedPosition &pos) {
+        m_positions.Add(GetPointer(pos));
     }
     
-    ManagedPosition* FindByTicket(ulong ticket) {
+    CManagedPosition* FindByTicket(ulong ticket) {
         for(int i = 0; i < m_positions.Total(); i++) {
-            ManagedPosition* pos = (ManagedPosition*)m_positions.At(i);
-            if(pos != NULL && pos.ticket == ticket) {
+            CManagedPosition* pos = (CManagedPosition*)m_positions.At(i);
+            if(pos != NULL && pos->ticket == ticket) {
                 return pos;
             }
         }
@@ -100,8 +118,8 @@ public:
     
     void RemoveByTicket(ulong ticket) {
         for(int i = 0; i < m_positions.Total(); i++) {
-            ManagedPosition* pos = (ManagedPosition*)m_positions.At(i);
-            if(pos != NULL && pos.ticket == ticket) {
+            CManagedPosition* pos = (CManagedPosition*)m_positions.At(i);
+            if(pos != NULL && pos->ticket == ticket) {
                 m_positions.Delete(i);
                 break;
             }
@@ -112,8 +130,8 @@ public:
         return m_positions.Total();
     }
     
-    ManagedPosition* At(int index) {
-        return (ManagedPosition*)m_positions.At(index);
+    CManagedPosition* At(int index) {
+        return (CManagedPosition*)m_positions.At(index);
     }
     
     void Clear() {
@@ -169,19 +187,19 @@ public:
 
 private:
     // --- Приватные Методы-Обработчики ---
-    void HandleBreakEven(ManagedPosition* pos, E_MarketRegime regime);
-    void HandleTakeProfit(ManagedPosition* pos, E_MarketRegime regime);
-    void HandleAddons(ManagedPosition* pos, E_MarketRegime regime);
-    void HandleTrailingStop(ManagedPosition* pos);
+    void HandleBreakEven(CManagedPosition &pos, E_MarketRegime regime);
+    void HandleTakeProfit(CManagedPosition &pos, E_MarketRegime regime);
+    void HandleAddons(CManagedPosition &pos, E_MarketRegime regime);
+    void HandleTrailingStop(CManagedPosition &pos);
     
     // --- Вспомогательные методы ---
-    double CalculateProfitR(ManagedPosition* pos);
+    double CalculateProfitR(CManagedPosition &pos);
     bool IsImpulseConfirmed(const string symbol, int direction);
     bool HasMomentumDivergence(const string symbol, int direction);
     double GetADRPercent(const string symbol);
     void PartialClose(ulong ticket, double volume_percent, string reason);
     void MoveSLToLevel(ulong ticket, double new_sl, string reason);
-    bool InitializePositionData(ManagedPosition* pos);
+    bool InitializePositionData(CManagedPosition &pos);
     double GetVolumeRatioForRegime(E_MarketRegime regime, int tp_level);
 };
 
@@ -256,26 +274,26 @@ void CPositionManager::OnTick(E_MarketRegime current_regime) {
     
     // Обрабатываем каждую управляемую позицию
     for(int i = 0; i < m_managed_positions.Total(); i++) {
-        ManagedPosition* pos = m_managed_positions.At(i);
+        CManagedPosition* pos = m_managed_positions.At(i);
         if(pos == NULL) continue;
         
         // Проверяем, что позиция еще существует
-        if(!PositionSelectByTicket(pos.ticket)) {
+        if(!PositionSelectByTicket(pos->ticket)) {
             continue; // Позиция закрыта, будет удалена в RemoveClosedPositions
         }
         
         // Инициализируем данные позиции при первом обращении
-        if(pos.initial_risk_R == 0.0) {
-            if(!InitializePositionData(pos)) {
+        if(pos->initial_risk_R == 0.0) {
+            if(!InitializePositionData(*pos)) {
                 continue; // Ошибка инициализации
             }
         }
         
         // Применяем логику управления
-        HandleBreakEven(pos, current_regime);
-        HandleTakeProfit(pos, current_regime);
-        HandleAddons(pos, current_regime);
-        HandleTrailingStop(pos);
+        HandleBreakEven(*pos, current_regime);
+        HandleTakeProfit(*pos, current_regime);
+        HandleAddons(*pos, current_regime);
+        HandleTrailingStop(*pos);
     }
 }
 
@@ -294,9 +312,9 @@ void CPositionManager::AddNewPosition(ulong ticket, int signal_category, double 
     }
     
     string symbol = PositionGetString(POSITION_SYMBOL);
-    ManagedPosition* new_pos = new ManagedPosition(ticket, symbol, signal_category, signal_score);
+    CManagedPosition* new_pos = new CManagedPosition(ticket, symbol, signal_category, signal_score);
     
-    m_managed_positions.Add(new_pos);
+    m_managed_positions.Add(*new_pos);
     
     Print("Position Manager: Added position ", ticket, " (", symbol, ") to management. Category: ", signal_category);
 }
@@ -306,12 +324,12 @@ void CPositionManager::AddNewPosition(ulong ticket, int signal_category, double 
 //+------------------------------------------------------------------+
 void CPositionManager::RemoveClosedPositions() {
     for(int i = m_managed_positions.Total() - 1; i >= 0; i--) {
-        ManagedPosition* pos = m_managed_positions.At(i);
+        CManagedPosition* pos = m_managed_positions.At(i);
         if(pos == NULL) continue;
         
-        if(!PositionSelectByTicket(pos.ticket)) {
-            Print("Position Manager: Removing closed position ", pos.ticket);
-            m_managed_positions.RemoveByTicket(pos.ticket);
+        if(!PositionSelectByTicket(pos->ticket)) {
+            Print("Position Manager: Removing closed position ", pos->ticket);
+            m_managed_positions.RemoveByTicket(pos->ticket);
         }
     }
 }
@@ -319,7 +337,7 @@ void CPositionManager::RemoveClosedPositions() {
 //+------------------------------------------------------------------+
 //| Логика безубытка                                                 |
 //+------------------------------------------------------------------+
-void CPositionManager::HandleBreakEven(ManagedPosition* pos, E_MarketRegime regime) {
+void CPositionManager::HandleBreakEven(CManagedPosition &pos, E_MarketRegime regime) {
     if(!PositionSelectByTicket(pos.ticket)) return;
     
     double profit_R = CalculateProfitR(pos);
@@ -366,7 +384,7 @@ void CPositionManager::HandleBreakEven(ManagedPosition* pos, E_MarketRegime regi
 //+------------------------------------------------------------------+
 //| Логика тейк-профита                                              |
 //+------------------------------------------------------------------+
-void CPositionManager::HandleTakeProfit(ManagedPosition* pos, E_MarketRegime regime) {
+void CPositionManager::HandleTakeProfit(CManagedPosition &pos, E_MarketRegime regime) {
     if(!PositionSelectByTicket(pos.ticket)) return;
     
     double profit_R = CalculateProfitR(pos);
@@ -416,7 +434,7 @@ void CPositionManager::HandleTakeProfit(ManagedPosition* pos, E_MarketRegime reg
 //+------------------------------------------------------------------+
 //| Логика доливок (пирамидинг)                                      |
 //+------------------------------------------------------------------+
-void CPositionManager::HandleAddons(ManagedPosition* pos, E_MarketRegime regime) {
+void CPositionManager::HandleAddons(CManagedPosition &pos, E_MarketRegime regime) {
     // Проверка лимита
     if(pos.addons_count >= m_max_addons_per_position) return;
     
@@ -443,19 +461,19 @@ void CPositionManager::HandleAddons(ManagedPosition* pos, E_MarketRegime regime)
     // AI-анализ тактики управления позицией (если AI-Слой доступен)
     if(m_ai_layer_ptr != NULL && m_ai_layer_ptr->IsInitialized() && m_ai_layer_ptr->IsAiAnalysisEnabled()) {
         string position_info = StringFormat("Ticket=%d, Symbol=%s, Category=%d, Score=%.2f", 
-                                          pos->ticket, pos->symbol, pos->signal_category, pos->signal_score);
+                                          pos.ticket, pos.symbol, pos.signal_category, pos.signal_score);
         string market_context = StringFormat("Regime=%s, Addons=%d, Profit_R=%.2f", 
-                                           EnumToString(regime), pos->addons_count, profit_R);
+                                           EnumToString(regime), pos.addons_count, profit_R);
         
         string ai_tactic = m_ai_layer_ptr->SuggestTactic(position_info, market_context);
         
         // Если AI рекомендует не добавлять позицию, пропускаем
         if(StringFind(ai_tactic, "avoid") >= 0 || StringFind(ai_tactic, "no addon") >= 0) {
-            Print("Position Manager: AI recommendation - ", ai_tactic, " for position ", pos->ticket);
+            Print("Position Manager: AI recommendation - ", ai_tactic, " for position ", pos.ticket);
             return;
         }
         
-        Print("Position Manager: AI tactic suggestion - ", ai_tactic, " for position ", pos->ticket);
+        Print("Position Manager: AI tactic suggestion - ", ai_tactic, " for position ", pos.ticket);
     }
     
     // Простая проверка сигнала продолжения (новый локальный экстремум)
@@ -502,7 +520,7 @@ void CPositionManager::HandleAddons(ManagedPosition* pos, E_MarketRegime regime)
 //+------------------------------------------------------------------+
 //| Трэйлинг стоп для раннеров                                       |
 //+------------------------------------------------------------------+
-void CPositionManager::HandleTrailingStop(ManagedPosition* pos) {
+void CPositionManager::HandleTrailingStop(CManagedPosition &pos) {
     // Трэйлинг применяется только к раннерам (после TP1 и TP2)
     if(!pos.tp1_triggered || !pos.tp2_triggered) return;
     
@@ -536,7 +554,7 @@ void CPositionManager::HandleTrailingStop(ManagedPosition* pos) {
 //+------------------------------------------------------------------+
 //| Вспомогательные методы                                           |
 //+------------------------------------------------------------------+
-double CPositionManager::CalculateProfitR(ManagedPosition* pos) {
+double CPositionManager::CalculateProfitR(CManagedPosition &pos) {
     if(!PositionSelectByTicket(pos.ticket)) return 0.0;
     if(pos.initial_risk_R <= 0) return 0.0;
     
@@ -664,7 +682,7 @@ void CPositionManager::MoveSLToLevel(ulong ticket, double new_sl, string reason)
     }
 }
 
-bool CPositionManager::InitializePositionData(ManagedPosition* pos) {
+bool CPositionManager::InitializePositionData(CManagedPosition &pos) {
     if(!PositionSelectByTicket(pos.ticket)) return false;
     
     pos.initial_price = PositionGetDouble(POSITION_PRICE_OPEN);
@@ -729,13 +747,13 @@ void CPositionManager::SynchronizeState() {
     
     // Проверяем каждую управляемую позицию
     for(int i = m_managed_positions.Total() - 1; i >= 0; i--) {
-        ManagedPosition* pos = m_managed_positions.At(i);
+        CManagedPosition* pos = m_managed_positions.At(i);
         if(pos == NULL) continue;
         
         bool position_exists = false;
         
         // Проверяем существование позиции
-        if(PositionSelectByTicket(pos.ticket)) {
+        if(PositionSelectByTicket(pos->ticket)) {
             // Позиция существует, проверяем ее актуальность
             if(PositionGetInteger(POSITION_MAGIC) == MAGIC_NUMBER) {
                 position_exists = true;
@@ -744,8 +762,8 @@ void CPositionManager::SynchronizeState() {
         
         // Если позиция не существует, удаляем ее из управления
         if(!position_exists) {
-            Print("Position Manager: Removing non-existent position ", pos.ticket, " from management");
-            m_managed_positions.RemoveByTicket(pos.ticket);
+            Print("Position Manager: Removing non-existent position ", pos->ticket, " from management");
+            m_managed_positions.RemoveByTicket(pos->ticket);
             removed_count++;
         }
     }
