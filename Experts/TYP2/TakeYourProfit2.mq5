@@ -20,6 +20,33 @@ input ENUM_DAY_OF_WEEK inp_eow_day = FRIDAY;                    // День не
 input int inp_eow_hour = 15;                                    // Час остановки торговли
 input bool inp_is_recovery_protocol_enabled = true;             // Включить протокол восстановления
 
+// --- Inputs для ExecGate ---
+input group "Execution Filters Settings"
+input bool inp_is_news_guard_enabled = true;                    // Включить защиту от новостей
+input bool inp_is_spread_guard_enabled = true;                  // Включить защиту от спреда
+input bool inp_is_volatility_guard_enabled = true;              // Включить защиту от волатильности
+input bool inp_is_session_guard_enabled = true;                 // Включить защиту по сессиям
+input bool inp_is_slippage_guard_enabled = true;                // Включить защиту от проскальзывания
+input int inp_news_block_minutes_before = 30;                   // Блокировка до новостей (минуты)
+input int inp_news_block_minutes_after = 15;                    // Блокировка после новостей (минуты)
+input int inp_high_impact_block_minutes = 60;                   // Блокировка для высокого воздействия (минуты)
+input int inp_medium_impact_block_minutes = 30;                 // Блокировка для среднего воздействия (минуты)
+input int inp_low_impact_block_minutes = 15;                    // Блокировка для низкого воздействия (минуты)
+input double inp_max_spread_pips = 3.0;                         // Максимальный спред в пипсах
+input double inp_atr_multiplier_for_spread = 2.0;               // Множитель ATR для динамического спреда
+input double inp_max_volatility_percent = 5.0;                  // Максимальная волатильность в %
+input int inp_volatility_lookback_periods = 20;                 // Период для расчета волатильности
+input bool inp_is_london_session_enabled = true;                // Включить Лондонскую сессию
+input bool inp_is_new_york_session_enabled = true;              // Включить Нью-Йоркскую сессию
+input bool inp_is_tokyo_session_enabled = false;                // Включить Токийскую сессию
+input int inp_london_start_hour = 8;                            // Начало Лондонской сессии (час)
+input int inp_london_end_hour = 17;                             // Конец Лондонской сессии (час)
+input int inp_new_york_start_hour = 13;                         // Начало Нью-Йоркской сессии (час)
+input int inp_new_york_end_hour = 22;                           // Конец Нью-Йоркской сессии (час)
+input int inp_tokyo_start_hour = 0;                             // Начало Токийской сессии (час)
+input int inp_tokyo_end_hour = 9;                               // Конец Токийской сессии (час)
+input double inp_max_slippage_pips = 2.0;                       // Максимальное проскальзывание в пипсах
+
 #include <Trade/Trade.mqh>
 CTrade trade;
 
@@ -91,16 +118,30 @@ int OnInit()
   
   // --- Инициализация фильтров исполнения ---
   g_ExecGate.Initialize(
-    true,   // is_news_guard_enabled
-    30,     // news_pre_mins
-    15,     // news_post_mins
-    0.5,    // spread_atr_multiplier
-    2.0,    // sl_atr_multiplier_trend
-    1.5,    // sl_atr_multiplier_flat
-    16,     // session_end_hour
-    0.5,    // min_atr_multiplier
-    3.0,    // max_atr_multiplier
-    3.0     // max_slippage_pips
+    inp_is_news_guard_enabled,                    // is_news_guard_enabled
+    inp_is_spread_guard_enabled,                  // is_spread_guard_enabled
+    inp_is_volatility_guard_enabled,              // is_volatility_guard_enabled
+    inp_is_session_guard_enabled,                 // is_session_guard_enabled
+    inp_is_slippage_guard_enabled,                // is_slippage_guard_enabled
+    inp_news_block_minutes_before,                // news_block_minutes_before
+    inp_news_block_minutes_after,                 // news_block_minutes_after
+    inp_high_impact_block_minutes,                // high_impact_block_minutes
+    inp_medium_impact_block_minutes,              // medium_impact_block_minutes
+    inp_low_impact_block_minutes,                 // low_impact_block_minutes
+    inp_max_spread_pips,                          // max_spread_pips
+    inp_atr_multiplier_for_spread,                // atr_multiplier_for_spread
+    inp_max_volatility_percent,                   // max_volatility_percent
+    inp_volatility_lookback_periods,              // volatility_lookback_periods
+    inp_is_london_session_enabled,                // is_london_session_enabled
+    inp_is_new_york_session_enabled,              // is_new_york_session_enabled
+    inp_is_tokyo_session_enabled,                 // is_tokyo_session_enabled
+    inp_london_start_hour,                        // london_start_hour
+    inp_london_end_hour,                          // london_end_hour
+    inp_new_york_start_hour,                      // new_york_start_hour
+    inp_new_york_end_hour,                        // new_york_end_hour
+    inp_tokyo_start_hour,                         // tokyo_start_hour
+    inp_tokyo_end_hour,                           // tokyo_end_hour
+    inp_max_slippage_pips                         // max_slippage_pips
   );
   Print("ExecGate: Initialized");
   
@@ -404,6 +445,34 @@ void OnTick(){
     Print("=== FLATTEN REQUIRED === Closing all positions due to news");
     // Здесь должна быть логика закрытия всех позиций
     // CloseAllPositions();
+  }
+  
+  // --- ПРОВЕРКА ГЛОБАЛЬНЫХ ГВАРДОВ (RISK MANAGER) ---
+  string reason;
+  double risk_modifier = g_RiskManager.GetRiskModifier(_Symbol, 1.0, reason);
+  if (risk_modifier <= 0) {
+    // Логируем причину блокировки и выходим
+    Print("=== RISK BLOCK === ", reason);
+    return;
+  }
+  
+  // --- ПРОВЕРКА ГВАРДОВ ИСПОЛНЕНИЯ (EXEC GATE) ---
+  // Проверяем разрешение на исполнение (направление будет определено позже)
+  if (!g_ExecGate.IsExecutionAllowed(_Symbol, 1, newRegime, reason)) {
+    // Логируем причину блокировки и выходим
+    Print("=== EXEC BLOCK === ", reason);
+    return;
+  }
+  
+  // --- ФИНАЛЬНЫЙ РАСЧЕТ ПАРАМЕТРОВ ---
+  // Получаем асимметричный стоп-лосс (направление будет определено позже)
+  double sl_pips = g_ExecGate.GetAsymmetricStopLossPips(_Symbol, 1, newRegime);
+  double base_risk = 1.0; // 1.0% базовый риск
+  double final_risk = base_risk * risk_modifier; // Применяем модификатор от DD
+  
+  // Логируем параметры для отладки
+  if(risk_modifier < 1.0) {
+    Print("=== RISK MODIFIED === Base risk: ", base_risk, "%, Final risk: ", final_risk, "%, Modifier: ", risk_modifier);
   }
   
   // --- Реагируем на смену режима ---
