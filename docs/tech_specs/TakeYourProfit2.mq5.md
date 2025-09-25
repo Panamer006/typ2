@@ -3,12 +3,25 @@
 //+------------------------------------------------------------------+
 #property version   "6.01"
 #property strict
+
+#include "Modules/typ_core.mqh"
+#include "Modules/typ_regime_engine.mqh"
+#include "Modules/typ_risk.mqh"
+#include "Modules/typ_execfilters.mqh"
+
+// --- ГЛОБАЛЬНЫЕ ОБЪЕКТЫ ---
+CRegimeEngine   g_RegimeEngine;
+E_MarketRegime  g_currentRegime;
+
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
 //+------------------------------------------------------------------+
 int OnInit()
 {
-  Print("TYP2 Ground Zero Initialized.");
+  Print("TYP2 Skeleton Built. Initializing modules...");
+  
+  g_RegimeEngine.Initialize(_Symbol, PERIOD_H1);
+  
   return(INIT_SUCCEEDED);
 }
 //+------------------------------------------------------------------+
@@ -23,6 +36,13 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
 {
-  //
+  g_RegimeEngine.Update(_Symbol, PERIOD_H1);
+  E_MarketRegime newRegime = g_RegimeEngine.GetCurrentRegime();
+
+  if(newRegime != g_currentRegime) 
+  {
+    g_currentRegime = newRegime;
+    Print("=== REGIME CHANGE === New Market Regime: ", EnumToString(g_currentRegime));
+  }
 }
 //+------------------------------------------------------------------+
