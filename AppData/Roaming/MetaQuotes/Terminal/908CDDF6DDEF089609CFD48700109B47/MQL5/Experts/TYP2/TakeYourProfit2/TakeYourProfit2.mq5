@@ -1,18 +1,20 @@
 //+------------------------------------------------------------------+
 //|                                           TakeYourProfit2.mq5 |
 //+------------------------------------------------------------------+
-#property version   "6.05" // Версия обновлена
+#property version   "6.06" // Версия обновлена
 #property strict
 
+// --- ПОДКЛЮЧАЕМ ВСЕ МОДУЛИ ---
 #include "Modules/typ_core.mqh"
 #include "Modules/typ_regime_engine.mqh"
 #include "Modules/typ_risk.mqh"
 #include "Modules/typ_execfilters.mqh"
 #include "Modules/typ_pm.mqh"
-#include "Modules/typ_chart_objects.mqh" // <<<--- ИНТЕГРАЦИЯ НОВОГО МОДУЛЯ
+#include "Modules/typ_chart_objects.mqh"
+#include "Modules/typ_strategies.mqh" // <<<--- НОВЫЙ МОДУЛЬ
 
 // --- INPUT ПАРАМЕТРЫ ---
-input bool InpShowOnChart = true; // <<<--- НОВЫЙ ПАРАМЕТР
+input bool InpShowOnChart = true;
 input double InpMaxDailyDD = 5.0;
 input bool InpGradualDD = true;
 input int InpMaxOrders = 10;
@@ -20,11 +22,15 @@ input double InpMaxSpreadPips = 3.0;
 input double InpBaseRiskPercent = 1.0;
 
 // --- ГЛОБАЛЬНЫЕ ОБЪЕКТЫ ---
-CChartObjectsManager g_ChartManager; // <<<--- НОВЫЙ ОБЪЕКТ
+CChartObjectsManager g_ChartManager;
 CRegimeEngine   g_RegimeEngine;
 CRiskManager    g_RiskManager;
 CExecGate       g_ExecGate;
 CPositionManager g_PosManager;
+CPatterns           g_Patterns; // <<<--- НОВЫЙ ОБЪЕКТ
+CFigures            g_Figures;  // <<<--- НОВЫЙ ОБЪЕКТ
+CFibo               g_Fibo;     // <<<--- НОВЫЙ ОБЪЕКТ
+CStrategy_NightMR   g_Strategy_NightMR; // <<<--- НОВЫЙ ОБЪЕКТ
 E_MarketRegime  g_currentRegime;
 
 //+------------------------------------------------------------------+
@@ -32,11 +38,12 @@ int OnInit()
 {
   Print("TYP2 Initializing Modules...");
   
-  g_ChartManager.Initialize(ChartID()); // <<<--- ИНИЦИАЛИЗАЦИЯ
+  g_ChartManager.Initialize(ChartID());
   g_RegimeEngine.Initialize(_Symbol, PERIOD_H1);
   g_RiskManager.Initialize(InpMaxDailyDD, InpGradualDD, InpMaxOrders);
   g_ExecGate.Initialize(InpMaxSpreadPips);
   g_PosManager.Initialize(&g_RiskManager);
+  g_Strategy_NightMR.Initialize(&g_Patterns); // <<<--- ИНИЦИАЛИЗАЦИЯ
   
   return(INIT_SUCCEEDED);
 }
@@ -45,7 +52,7 @@ void OnDeinit(const int reason) {}
 //+------------------------------------------------------------------+
 void OnTick()
 {
-  if(InpShowOnChart) g_ChartManager.OnTickStart(); // <<<--- ВЫЗОВ В НАЧАЛЕ
+  if(InpShowOnChart) g_ChartManager.OnTickStart();
   
   g_RegimeEngine.Update(_Symbol, PERIOD_H1);
   g_RiskManager.OnTick();
@@ -78,6 +85,14 @@ void OnTick()
           Print("RiskManager Block: ", reason);
       }
   }
+
+  // --- БЛОК ГЕНЕРАЦИИ СИГНАЛОВ (ЗАГЛУШКА) ---
+  if (g_currentRegime == REGIME_FLAT_QUIET) {
+      SignalCandidate night_mr_signal = g_Strategy_NightMR.GetSignal();
+      if (night_mr_signal.isValid) {
+          // Логика открытия сделки будет здесь
+      }
+  }
   
   // --- Блок визуализации (пока пустой) ---
   if(InpShowOnChart)
@@ -86,6 +101,6 @@ void OnTick()
       g_ChartManager.DrawLabel("test_label", "Regime: " + EnumToString(g_currentRegime));
   }
   
-  if(InpShowOnChart) g_ChartManager.OnTickEnd(); // <<<--- ВЫЗОВ В КОНЦЕ
+  if(InpShowOnChart) g_ChartManager.OnTickEnd();
 }
 //+------------------------------------------------------------------+
