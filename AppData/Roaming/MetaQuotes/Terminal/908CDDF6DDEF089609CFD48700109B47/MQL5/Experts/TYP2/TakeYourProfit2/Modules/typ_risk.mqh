@@ -27,18 +27,21 @@ private:
     double   m_equity_on_day_start;
     datetime m_current_day_start_time;
     bool     m_is_trading_blocked_by_dd;
+    bool     m_is_parental_lock_active; // Новый флаг для Parental Lock
 
 public:
     CRiskManager() : m_max_daily_dd_percent(5.0), m_is_gradual_dd_reduction_enabled(true), m_max_total_open_orders(10),
-                     m_equity_on_day_start(0), m_current_day_start_time(0), m_is_trading_blocked_by_dd(false) {}
+                     m_equity_on_day_start(0), m_current_day_start_time(0), m_is_trading_blocked_by_dd(false), m_is_parental_lock_active(false) {}
     ~CRiskManager() {}
 
+    // Инициализирует параметры управления рисками
     void Initialize(double max_daily_dd, bool gradual_dd, int max_orders) {
         m_max_daily_dd_percent = max_daily_dd;
         m_is_gradual_dd_reduction_enabled = gradual_dd;
         m_max_total_open_orders = max_orders;
     }
 
+    // Обновляет состояние риск-менеджера на каждом тике
     void OnTick() {
         datetime now = TimeCurrent();
         if (m_current_day_start_time == 0) { // First tick initialization
@@ -52,6 +55,7 @@ public:
         }
     }
     
+    // Проверяет, допустимы ли текущие риски для торговли
     bool IsRiskOK(string &reason) {
         // --- Daily DD Check ---
         double current_equity = AccountInfoDouble(ACCOUNT_EQUITY);
@@ -73,6 +77,7 @@ public:
         return true;
     }
     
+    // Рассчитывает размер лота на основе риска и стоп-лосса
     double CalculateLotSize(double balance, double risk_percent, double sl_pips) {
         if (sl_pips <= 0) return 0.01;
         double tick_value = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
@@ -82,6 +87,16 @@ public:
         if (sl_money <= 0) return 0.01;
         
         return NormalizeDouble(risk_money / sl_money, 2);
+    }
+    
+    // Проверяет, активен ли Parental Lock (не изменяет состояние)
+    bool IsParentalLockOK(string &reason) const {
+        // TODO: Implement full ParentalLock logic using OnTradeTransaction event.
+        if (m_is_parental_lock_active) {
+            reason = "Parental Lock is active";
+            return false;
+        }
+        return true;
     }
 };
 #endif
