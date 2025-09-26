@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                           TakeYourProfit2.mq5 |
 //+------------------------------------------------------------------+
-#property version   "6.04" // Версия обновлена
+#property version   "6.05" // Версия обновлена
 #property strict
 
 #include "Modules/typ_core.mqh"
@@ -9,8 +9,10 @@
 #include "Modules/typ_risk.mqh"
 #include "Modules/typ_execfilters.mqh"
 #include "Modules/typ_pm.mqh"
+#include "Modules/typ_chart_objects.mqh" // <<<--- ИНТЕГРАЦИЯ НОВОГО МОДУЛЯ
 
 // --- INPUT ПАРАМЕТРЫ ---
+input bool InpShowOnChart = true; // <<<--- НОВЫЙ ПАРАМЕТР
 input double InpMaxDailyDD = 5.0;
 input bool InpGradualDD = true;
 input int InpMaxOrders = 10;
@@ -18,6 +20,7 @@ input double InpMaxSpreadPips = 3.0;
 input double InpBaseRiskPercent = 1.0;
 
 // --- ГЛОБАЛЬНЫЕ ОБЪЕКТЫ ---
+CChartObjectsManager g_ChartManager; // <<<--- НОВЫЙ ОБЪЕКТ
 CRegimeEngine   g_RegimeEngine;
 CRiskManager    g_RiskManager;
 CExecGate       g_ExecGate;
@@ -27,8 +30,9 @@ E_MarketRegime  g_currentRegime;
 //+------------------------------------------------------------------+
 int OnInit()
 {
-  Print("TYP2 Initializing Modules (Refactored)...");
+  Print("TYP2 Initializing Modules...");
   
+  g_ChartManager.Initialize(ChartID()); // <<<--- ИНИЦИАЛИЗАЦИЯ
   g_RegimeEngine.Initialize(_Symbol, PERIOD_H1);
   g_RiskManager.Initialize(InpMaxDailyDD, InpGradualDD, InpMaxOrders);
   g_ExecGate.Initialize(InpMaxSpreadPips);
@@ -41,6 +45,8 @@ void OnDeinit(const int reason) {}
 //+------------------------------------------------------------------+
 void OnTick()
 {
+  if(InpShowOnChart) g_ChartManager.OnTickStart(); // <<<--- ВЫЗОВ В НАЧАЛЕ
+  
   g_RegimeEngine.Update(_Symbol, PERIOD_H1);
   g_RiskManager.OnTick();
   g_PosManager.OnTick(g_currentRegime);
@@ -49,7 +55,7 @@ void OnTick()
   if (TimeCurrent() - last_trade_time > 3600)
   {
       string reason = "";
-      if (g_RiskManager.IsRiskOK(reason) && g_RiskManager.IsParentalLockOK(reason)) // <<<--- ДОБАВЛЕНА ПРОВЕРКА
+      if (g_RiskManager.IsRiskOK(reason) && g_RiskManager.IsParentalLockOK(reason))
       {
           if (g_ExecGate.IsExecutionAllowed(reason)) 
           {
@@ -72,5 +78,14 @@ void OnTick()
           Print("RiskManager Block: ", reason);
       }
   }
+  
+  // --- Блок визуализации (пока пустой) ---
+  if(InpShowOnChart)
+  {
+      // TODO: Здесь в будущем будет вызываться отрисовка паттернов и фигур
+      g_ChartManager.DrawLabel("test_label", "Regime: " + EnumToString(g_currentRegime));
+  }
+  
+  if(InpShowOnChart) g_ChartManager.OnTickEnd(); // <<<--- ВЫЗОВ В КОНЦЕ
 }
 //+------------------------------------------------------------------+
