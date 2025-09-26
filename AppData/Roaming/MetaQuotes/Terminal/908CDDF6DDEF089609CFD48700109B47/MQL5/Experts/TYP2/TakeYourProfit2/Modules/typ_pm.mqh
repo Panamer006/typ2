@@ -34,15 +34,18 @@ public:
         }
     }
     
+    // Инициализирует менеджер позиций с указателем на риск-менеджер
     void Initialize(CRiskManager* risk_manager) {
         m_risk_manager_ptr = risk_manager;
     }
 
+    // Обновляет управление всеми позициями на каждом тике
     void OnTick(E_MarketRegime current_regime) {
         // TODO: В будущем здесь будет цикл по всем управляемым позициям
         // для вызова HandleBreakEven, HandleTakeProfit и т.д.
     }
 
+    // Добавляет новую позицию под управление менеджера
     void AddNewPosition(ulong ticket, double initial_risk) {
         CManagedPosition* pos = new CManagedPosition();
         pos.ticket = ticket;
