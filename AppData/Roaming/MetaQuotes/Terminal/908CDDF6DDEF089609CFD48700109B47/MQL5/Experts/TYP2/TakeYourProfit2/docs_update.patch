@@ -1,0 +1,90 @@
+--- a/docs/ARCHITECTURE.md
++++ b/docs/ARCHITECTURE.md
+@@ -1,29 +1,28 @@
+ # TYP2 System Architecture
+ 
+ ## 1. Ключевые Модули
+-- **CRegimeEngine:** Определяет режим рынка (тренд/флэт).
+-- **CRiskManager:** Управляет рисками (просадка, лимиты ордеров).
+-- **CExecGate:** Фильтрует сделки перед исполнением (спред, волатильность).
+-- **CPositionManager:** Сопровождает открытые позиции (безубыток, тейки).
+-- **CChartObjectsManager:** Управляет отрисовкой на графике.
+-- **CPatterns, CFigures, CFibo:** Библиотеки Технического Анализа.
+-- **CStrategy_...:** Модули конкретных торговых стратегий.
++- **CRegimeEngine:** Определяет режим рынка.
++- **CRiskManager:** Управляет рисками капитала.
++- **CExecGate:** Фильтрует сделки перед исполнением.
++- **CPositionManager:** Сопровождает открытые позиции.
++- **CChartObjectsManager:** Управляет отрисовкой объектов.
++- **CPatterns, CFigures, CFibo:** Библиотеки Технического Анализа (Спринт 2).
++- **CStrategy_...:** Модули торговых стратегий (Спринт 2).
+ 
+ ## 2. Главные Потоки Данных
+ - **OnInit():** Происходит инициализация всех глобальных объектов (`g_RegimeEngine`, `g_RiskManager` и т.д.).
+ - **OnTick():**
+-            1. `g_ChartManager.OnTickStart()` - Подготовка к отрисовке.
+-            2. `g_RegimeEngine.Update()` - Обновление режима рынка.
+-            3. `g_RiskManager.OnTick()` - Обновление дневных лимитов.
+-            4. `g_PosManager.OnTick()` - Проверка открытых позиций.
+-            5. **Проверки "Гвардов":**
+-                - `g_RiskManager.IsRiskOK()`
+-                - `g_ExecGate.IsExecutionAllowed()`
+-            6. **Генерация Сигналов:**
+-                - `g_Strategy_NightMR.GetSignal()`
+-            7. **Исполнение:**
+-                - `trade.Buy(...)`
+-                - `g_PosManager.AddNewPosition(...)`
+-            8. `g_ChartManager.OnTickEnd()` - Очистка старых объектов с графика.
++    1. `g_ChartManager.OnTickStart()`
++    2. `g_RegimeEngine.Update()`
++    3. `g_RiskManager.OnTick()`
++    4. `g_PosManager.OnTick()`
++    5. **Проверки "Гвардов":**
++        - `g_RiskManager.IsRiskOK()`
++        - `g_ExecGate.IsExecutionAllowed()`
++    6. **Генерация Сигналов (Спринт 2):**
++        - `g_Strategy_NightMR.GetSignal()`
++    7. **Исполнение:**
++        - `trade.Buy(...)`
++        - `g_PosManager.AddNewPosition(...)`
++    8. `g_ChartManager.OnTickEnd()`
+ 
+--- a/docs/ROADMAP.md
++++ b/docs/ROADMAP.md
+@@ -1,20 +1,20 @@
+ # TYP2 Project Roadmap
+ 
+-## Sprint 1: Создание "Шасси" (✅ ЗАВЕРШЕН)
+-- T2-CORE-REGIME
+-- T2-SECURITY-FOUNDATION
+-- T2-PM
++## Sprint 1: "Шасси" (✅ ЗАВЕРШЕН)
++- `T2-CORE-REGIME`
++- `T2-SECURITY-FOUNDATION`
++- `T2-PM`
+ 
+-## Промежуточный Спринт 1.5: Рефакторинг и Подготовка (✅ ЗАВЕРШЕН)
+-- T2-REFACTOR-SPRINT1
+-- T2-VISUALIZATION-LAYER
+-- T2-SKELETON-SPRINT2
++## Sprint 1.5: "Подготовка" (✅ ЗАВЕРШЕН)
++- `T2-REFACTOR-SPRINT1`
++- `T2-VISUALIZATION-LAYER`
++- `T2-SKELETON-SPRINT2`
+ 
+-## Sprint 2: "Двигатели для Флэта" и "Глаза Советника" (➡️ ТЕКУЩИЙ)
+-- **T2-SPRINT2:** Наполнение логикой модулей `CPatterns`, `CFigures`, `CFibo` и `CStrategy_NightMR`.
++## Sprint 2: "Двигатели и Глаза" (➡️ ТЕКУЩИЙ)
++- **T2-SPRINT2:** Наполнение логикой модулей ТА и Стратегий.
+ 
+-## Sprint 3: Флагманский "Дневной Двигатель" (⏳ ПЛАНИРУЕТСЯ)
+-- **T2-SPRINT3:** Реализация основной трендовой стратегии и финального "Мозга" (`Resolver`).
++## Sprint 3: "Флагманский Двигатель" (⏳ ПЛАНИРУЕТСЯ)
++- **T2-SPRINT3:** Реализация трендовой стратегии и `Resolver`.
+ 
+-## Sprint 4: "Закалка Стали" (⏳ ПЛАНИРУЕТСЯ)
+-- **T2-TESTING-AND-OPTIMIZATION:** Формализация процесса тестирования.
+-- **T2-AI-INTEGRATION:** Интеграция AI-слоя.
++## Sprint 4: "Закалка" (⏳ ПЛАНИРУЕТСЯ)
++- **T2-TESTING-AND-OPTIMIZATION:** Тестирование и оптимизация.
++- **T2-AI-INTEGRATION:** Интеграция AI.
