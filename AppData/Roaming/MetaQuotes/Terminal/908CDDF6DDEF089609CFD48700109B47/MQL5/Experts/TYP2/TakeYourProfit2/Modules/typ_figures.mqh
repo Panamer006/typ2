@@ -7,3 +7,5 @@ public:
     bool DetectHeadAndShoulders() const { return false; }
 };
 #endif
+
+

@@ -7,3 +7,5 @@ public:
     bool IsInFiboCluster(double price) const { return false; }
 };
 #endif
+
+

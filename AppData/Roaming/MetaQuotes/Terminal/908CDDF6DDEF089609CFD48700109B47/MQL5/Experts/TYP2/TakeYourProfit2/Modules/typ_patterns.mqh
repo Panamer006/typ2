@@ -9,3 +9,5 @@ public:
     bool IsBearishEngulfing(const MqlRates &rates[], int shift) const { return false; }
 };
 #endif
+
+
